@@ -380,9 +380,36 @@ void rslog_persist_and_loop(const char *text)
 	write_all(0);
 	int fl = cfg.fault_led < RSLOG_MAX_LEDS ? cfg.fault_led : 0;
 	if (!(led_present & BIT(fl))) fl = 0;
+
+	/* Exact chip timing without interrupts: the counter device is restarted as a
+	 * free-running clock and polled. The work per chip (encoder + GPIO) must not
+	 * add to the period, or packets grow taller than the LED blob in the frame.
+	 * Any counter width is handled by accumulating elapsed ticks. */
+	uint32_t top = 0, ticks = 0, prev = 0, acc = 0;
+	bool have_clock = false;
+	if (device_is_ready(timer_dev)) {
+		struct counter_top_cfg run = { .ticks = counter_get_max_top_value(timer_dev), .callback = NULL, .user_data = NULL, .flags = 0 };
+		if (counter_set_top_value(timer_dev, &run) == 0 && counter_start(timer_dev) == 0) {
+			top = run.ticks;
+			ticks = (uint32_t)(((uint64_t)counter_get_frequency(timer_dev) * chip_us) / 1000000u);
+			have_clock = ticks >= 4 && counter_get_value(timer_dev, &prev) == 0;
+		}
+	}
+	uint8_t chip = rs_tx_next_chip(&ftx);
 	for (;;) {
-		gpio_pin_set_dt(&leds[fl], rs_tx_next_chip(&ftx));
-		k_busy_wait(chip_us);     /* busy wait: no kernel, no interrupts needed */
+		if (have_clock) {
+			for (;;) {
+				uint32_t now;
+				counter_get_value(timer_dev, &now);
+				acc += (now >= prev) ? (now - prev) : (top - prev + 1u + now);
+				prev = now;
+				if (acc >= ticks) { acc -= ticks; break; }
+			}
+		} else {
+			k_busy_wait(chip_us);
+		}
+		gpio_pin_set_dt(&leds[fl], chip);
+		chip = rs_tx_next_chip(&ftx);           /* prepared while the chip is being shown */
 	}
 }
 
