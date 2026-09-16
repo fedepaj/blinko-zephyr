@@ -1,0 +1,4 @@
+name: rslog
+build:
+  cmake: .
+  kconfig: Kconfig

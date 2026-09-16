@@ -1,0 +1,19 @@
+# Minimal west manifest: this repo is the manifest repository (T2 topology).
+# Only the modules needed for nRF52840 boards are pulled in.
+manifest:
+  remotes:
+    - name: zephyrproject
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject
+      revision: v4.4.2
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_nordic
+          - segger
+          - tinycrypt
+  self:
+    path: zephyr-module

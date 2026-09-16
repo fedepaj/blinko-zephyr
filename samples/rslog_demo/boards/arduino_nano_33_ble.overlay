@@ -1,0 +1,38 @@
+/ {
+	aliases {
+		rslog-timer = &timer1;
+	};
+
+	chosen {
+		zephyr,shell-uart = &cdc_acm_uart0;
+		zephyr,console = &cdc_acm_uart0;
+	};
+};
+
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+&timer1 {
+	status = "okay";
+	prescaler = <4>;   /* 1 MHz */
+};
+
+/* Demo: short D2 to D3 -> real bus fault -> red LED of death (core path). */
+/ {
+	demo_short {
+		compatible = "gpio-keys";
+		short_sense: short_sense {
+			gpios = <&gpio1 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;   /* D2, pulled up */
+			zephyr,code = <0>;
+		};
+	};
+	demo_drive {
+		compatible = "gpio-leds";
+		short_drive: short_drive {
+			gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;                  /* D3, driven low */
+		};
+	};
+};

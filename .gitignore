@@ -1,0 +1,3 @@
+build/
+samples/*/build/
+.DS_Store
