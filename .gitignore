@@ -1,3 +1,4 @@
 build/
 samples/*/build/
 .DS_Store
+build.log
