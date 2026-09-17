@@ -25,7 +25,7 @@ config RSLOG_CHANNELS
 
 config RSLOG_PILOT_MS
 	int "RGB colour-calibration pilot interval (ms)"
-	default 100
+	default 30
 
 config RSLOG_FAULT_WEIGHT
 	int "FAULT visits per other visit in the death loop (1-4)"
