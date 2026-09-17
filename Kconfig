@@ -75,6 +75,21 @@ config RSLOG_NRF_FLASH_IN_FATAL
 	  Without this the record is kept in RAM and written to flash at the
 	  next boot (portable path).
 
+config RSLOG_LOG_BACKEND
+	bool "Zephyr log backend: LOG_ERR()/LOG_WRN()/LOG_INF() lines go to the LEDs"
+	depends on LOG && !LOG_MODE_MINIMAL
+	select LOG_OUTPUT
+	default y
+	help
+	  Every log line becomes an RSLog message (level mapped, no prefixes).
+	  Needs CONFIG_LOG_MODE_DEFERRED (the default); minimal mode has no backends.
+
+config RSLOG_LOG_BACKEND_LEVEL
+	int "Highest log level forwarded (1 ERR, 2 WRN, 3 INF, 4 DBG)"
+	depends on RSLOG_LOG_BACKEND
+	range 1 4
+	default 3
+
 config RSLOG_FATAL_HOOK
 	bool "Override k_sys_fatal_error_handler with the death loop"
 	default y

@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <rslog.h>
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(rslog_demo, LOG_LEVEL_DBG);
 
 static const struct device *wdt = DEVICE_DT_GET(DT_ALIAS(watchdog0));
 static const struct gpio_dt_spec short_sense = GPIO_DT_SPEC_GET(DT_NODELABEL(short_sense), gpios);
@@ -139,7 +141,25 @@ static int cmd_stat(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* zlog <err|wrn|inf|dbg> text...: a plain Zephyr LOG_x() call, forwarded by the log backend */
+static int cmd_zlog(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 3) { shell_print(sh, "usage: zlog err|wrn|inf|dbg text"); return -EINVAL; }
+	char text[96] = ""; size_t n = 0;
+	for (size_t i = 2; i < argc && n < sizeof(text) - 2; i++) {
+		if (i > 2) { text[n++] = ' '; }
+		size_t l = strlen(argv[i]); if (l > sizeof(text) - 1 - n) { l = sizeof(text) - 1 - n; }
+		memcpy(text + n, argv[i], l); n += l; text[n] = 0;
+	}
+	if (!strcmp(argv[1], "err")) { LOG_ERR("%s", text); }
+	else if (!strcmp(argv[1], "wrn")) { LOG_WRN("%s", text); }
+	else if (!strcmp(argv[1], "dbg")) { LOG_DBG("%s", text); }
+	else { LOG_INF("%s", text); }
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(rslog_cmds,
+	SHELL_CMD(zlog, NULL, "zlog err|wrn|inf|dbg text (Zephyr LOG_x -> LEDs)", cmd_zlog),
 	SHELL_CMD(info, NULL, "log INFO", cmd_info),
 	SHELL_CMD(warn, NULL, "log WARN", cmd_warn),
 	SHELL_CMD(err, NULL, "log ERROR", cmd_err),

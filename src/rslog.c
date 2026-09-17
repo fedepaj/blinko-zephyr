@@ -441,6 +441,24 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 	uint32_t lr = esf ? esf->basic.lr : 0;
 	char t[RS_MSG_MAX_LEN + 1];
 	snprintk(t, sizeof(t), "ZF%u p=%08x l=%08x", reason, (unsigned)pc, (unsigned)lr);
+	/* mini backtrace: return addresses found on the stack above the exception frame
+	 * (odd Thumb addresses inside flash), as an ERROR log copied into the death loop */
+	if (esf) {
+		const uint32_t *sp = (const uint32_t *)esf + sizeof(struct arch_esf) / 4;
+		uint32_t bt[3]; int nb = 0;
+		for (int i = 0; i < 96 && nb < 3; i++) {
+			uint32_t w = sp[i];
+			if ((w & 1) && w >= CONFIG_FLASH_BASE_ADDRESS + 0x100 &&
+			    w < CONFIG_FLASH_BASE_ADDRESS + CONFIG_FLASH_SIZE * 1024u && w != lr && w != (pc | 1)) {
+				bt[nb++] = w;
+			}
+		}
+		if (nb > 0) {
+			char b[RS_MSG_MAX_LEN + 1]; int n = snprintk(b, sizeof(b), "bt");
+			for (int i = 0; i < nb; i++) { n += snprintk(b + n, sizeof(b) - n, " %05x", (unsigned)bt[i]); }
+			rslog_log(RS_LVL_ERROR, "%s", b);
+		}
+	}
 	rslog_persist_and_loop(t);
 }
 #endif

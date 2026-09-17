@@ -1,5 +1,6 @@
 if(CONFIG_RSLOG)
   zephyr_library()
   zephyr_library_sources(src/rslog.c ${CMAKE_CURRENT_SOURCE_DIR}/core/rs_tx.c ${CMAKE_CURRENT_SOURCE_DIR}/core/rs_pack.c)
+  zephyr_library_sources_ifdef(CONFIG_RSLOG_LOG_BACKEND src/rslog_log_backend.c)
   zephyr_include_directories(include ${CMAKE_CURRENT_SOURCE_DIR}/core)
 endif()
