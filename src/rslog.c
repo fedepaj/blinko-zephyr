@@ -375,6 +375,7 @@ void rslog_persist_and_loop(const char *text)
 	/* Red LED of death: one stream on the fault LED only, always pulsed 150/50 ms. */
 	uint32_t chip_us = cfg.chip_us ? cfg.chip_us : 30;
 	rs_tx_set_channels(&ftx, 1, 0);
+	rs_tx_set_fault_weight(&ftx, CONFIG_RSLOG_FAULT_WEIGHT);
 	rs_tx_set_burst(&ftx, 150000u / chip_us, 50000u / chip_us);
 
 	write_all(0);

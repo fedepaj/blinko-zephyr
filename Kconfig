@@ -27,6 +27,15 @@ config RSLOG_PILOT_MS
 	int "RGB colour-calibration pilot interval (ms)"
 	default 100
 
+config RSLOG_FAULT_WEIGHT
+	int "FAULT visits per other visit in the death loop (1-4)"
+	range 1 4
+	default 3
+	help
+	  Airtime given to the fault reason while the board is dead: 3 means about
+	  70 % of the packets carry the FAULT message, so it completes in 1-2 s while
+	  STATUS and the last logs still follow.
+
 config RSLOG_BURST_ON_MS
 	int "Visible blink: transmit burst length (ms)"
 	default 150
