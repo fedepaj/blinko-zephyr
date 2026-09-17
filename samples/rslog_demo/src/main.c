@@ -226,7 +226,7 @@ int main(void)
 			(void)*bad;
 		}
 		if ((counter % 50) == 0) {
-			rslog_status("up=%us rst=%s n=%u", (unsigned)(k_uptime_get() / 1000), rslog_reset_cause(), counter / 50);
+			rslog_status("up=%us rst=%s n=%u id=%04x", (unsigned)(k_uptime_get() / 1000), rslog_reset_cause(), counter / 50, rslog_board_id());
 			rslog_checkpoint("main-loop");
 		}
 		counter++;
