@@ -50,6 +50,8 @@ void rslog_log(uint8_t level, const char *fmt, ...);
 #define rslog_warn(...)  rslog_log(RS_LVL_WARN, __VA_ARGS__)
 #define rslog_error(...) rslog_log(RS_LVL_ERROR, __VA_ARGS__)
 void rslog_status(const char *fmt, ...);
+/* 16-bit id derived from the SoC factory id (announced as "id=xxxx" in the boot STATUS). */
+uint16_t rslog_board_id(void);
 
 /* Record the reason and blink it forever on the fault LEDs. Never returns. */
 void rslog_fatal(uint8_t code, const char *fmt, ...) __attribute__((noreturn));

@@ -249,6 +249,14 @@ void rslog_log(uint8_t level, const char *fmt, ...)
 	va_list ap; va_start(ap, fmt); vlog(level, fmt, ap); va_end(ap);
 }
 
+uint16_t rslog_board_id(void)
+{
+	uint8_t id[16]; ssize_t n = hwinfo_get_device_id(id, sizeof(id));
+	uint32_t h = 2166136261u;
+	for (ssize_t i = 0; i < n; i++) { h ^= id[i]; h *= 16777619u; }   /* FNV-1a of the factory id */
+	return (uint16_t)(h ^ (h >> 16));
+}
+
 void rslog_status(const char *fmt, ...)
 {
 	char buf[RS_MSG_MAX_LEN + 1];
@@ -517,7 +525,7 @@ int rslog_init(const struct rslog_config *c)
 		set_slot(RS_SLOT_FAULT, RS_LVL_FAULT, fault_text, strlen(fault_text));
 	}
 	if (cfg.announce_boot) {
-		rslog_status("boot#%u rst=%s", ram_rec.boot_count, reset_cause_str);
+		rslog_status("boot#%u rst=%s id=%04x", ram_rec.boot_count, reset_cause_str, rslog_board_id());
 	}
 	apply_burst(&tx);
 	int rc = timer_start(cfg.chip_us);
