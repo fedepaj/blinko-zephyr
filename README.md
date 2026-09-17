@@ -1,9 +1,9 @@
-# rslog-zephyr
+# blinko-zephyr
 
-Zephyr module `rslog` (`CONFIG_RSLOG=y`): optical logging over the board LEDs
+Zephyr module `blinko` (`CONFIG_BLINKO=y`): optical logging over the board LEDs
 and the "red LED of death" fatal-error path, on portable Zephyr APIs
 (`counter`, `gpio`, `hwinfo`, `flash_map`). Shared core in the git submodule
-`core/`. `samples/rslog_demo` is a demo with a USB shell; `west.yml` makes
+`core/`. `samples/blinko_demo` is a demo with a USB shell; `west.yml` makes
 this repo a west manifest repository (see `docs/ZEPHYR.md`).
 
 ```sh

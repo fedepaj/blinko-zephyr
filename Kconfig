@@ -1,33 +1,33 @@
-menuconfig RSLOG
-	bool "RSLog optical logger (rolling-shutter camera link)"
+menuconfig BLINKO
+	bool "Blinko optical logger (rolling-shutter camera link)"
 	depends on GPIO && HWINFO && FLASH && FLASH_MAP && COUNTER
 	help
 	  Blink log messages on the board LEDs so a phone camera can decode them.
 	  On a fatal error the reason is written to RAM/flash and blinked forever
 	  on the fault LEDs ("red LED of death").
 	  Needs CONFIG_GPIO, CONFIG_HWINFO, CONFIG_FLASH, CONFIG_FLASH_MAP,
-	  CONFIG_COUNTER, a devicetree alias "rslog-timer" pointing at a counter
+	  CONFIG_COUNTER, a devicetree alias "blinko-timer" pointing at a counter
 	  device, led0..led3 aliases and a storage_partition.
 
-if RSLOG
+if BLINKO
 
-config RSLOG_CHIP_US
+config BLINKO_CHIP_US
 	int "Chip (half-bit) duration in microseconds"
 	default 30
 	help
 	  Must be >= 4 camera row times and >= the phone's minimum exposure.
 	  iPhone 14: 30 us.
 
-config RSLOG_CHANNELS
+config BLINKO_CHANNELS
 	int "LED channels: 3 = RGB streams on led0/led1/led2 (led3 mirrors led0), 1 = same stream on all"
 	range 1 3
 	default 3
 
-config RSLOG_PILOT_MS
+config BLINKO_PILOT_MS
 	int "RGB colour-calibration pilot interval (ms)"
 	default 30
 
-config RSLOG_FAULT_WEIGHT
+config BLINKO_FAULT_WEIGHT
 	int "FAULT visits per other visit in the death loop (1-4)"
 	range 1 4
 	default 3
@@ -36,38 +36,38 @@ config RSLOG_FAULT_WEIGHT
 	  70 % of the packets carry the FAULT message, so it completes in 1-2 s while
 	  STATUS and the last logs still follow.
 
-config RSLOG_BURST_ON_MS
+config BLINKO_BURST_ON_MS
 	int "Visible blink: transmit burst length (ms)"
 	default 150
 
-config RSLOG_BURST_OFF_MS
+config BLINKO_BURST_OFF_MS
 	int "Visible blink: dark pause length (ms, 0 = continuous). The death loop always pulses."
 	default 50
 
-config RSLOG_FAULT_LED
+config BLINKO_FAULT_LED
 	int "LED alias index used by the death loop (0 = led0, the red LED)"
 	default 0
 
-config RSLOG_PERSIST
+config BLINKO_PERSIST
 	bool "Persist fault records in flash (last page of storage_partition)"
 	default y
 
-config RSLOG_ANNOUNCE_BOOT
+config BLINKO_ANNOUNCE_BOOT
 	bool "Put boot count and reset cause in the STATUS slot at init"
 	default y
 
-config RSLOG_AUTO_INIT
+config BLINKO_AUTO_INIT
 	bool "Initialize automatically at boot (SYS_INIT, APPLICATION level)"
 	default y
 
-config RSLOG_RAM_RECORD_ADDR
+config BLINKO_RAM_RECORD_ADDR
 	hex "Address of the reset-surviving RAM record (0 = Zephyr .noinit)"
 	default 0
 	help
 	  Use a fixed high-RAM address when the board's bootloader clears low RAM
 	  (Arduino Nano 33 BLE: 0x2003F000).
 
-config RSLOG_NRF_FLASH_IN_FATAL
+config BLINKO_NRF_FLASH_IN_FATAL
 	bool "Persist the fault record immediately in the fatal handler (nrfx_nvmc)"
 	depends on SOC_FAMILY_NORDIC_NRF && NRFX_NVMC
 	default y
@@ -75,22 +75,22 @@ config RSLOG_NRF_FLASH_IN_FATAL
 	  Without this the record is kept in RAM and written to flash at the
 	  next boot (portable path).
 
-config RSLOG_LOG_BACKEND
+config BLINKO_LOG_BACKEND
 	bool "Zephyr log backend: LOG_ERR()/LOG_WRN()/LOG_INF() lines go to the LEDs"
 	depends on LOG && !LOG_MODE_MINIMAL
 	select LOG_OUTPUT
 	default y
 	help
-	  Every log line becomes an RSLog message (level mapped, no prefixes).
+	  Every log line becomes an Blinko message (level mapped, no prefixes).
 	  Needs CONFIG_LOG_MODE_DEFERRED (the default); minimal mode has no backends.
 
-config RSLOG_LOG_BACKEND_LEVEL
+config BLINKO_LOG_BACKEND_LEVEL
 	int "Highest log level forwarded (1 ERR, 2 WRN, 3 INF, 4 DBG)"
-	depends on RSLOG_LOG_BACKEND
+	depends on BLINKO_LOG_BACKEND
 	range 1 4
 	default 3
 
-config RSLOG_FATAL_HOOK
+config BLINKO_FATAL_HOOK
 	bool "Override k_sys_fatal_error_handler with the death loop"
 	default y
 

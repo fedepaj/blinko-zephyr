@@ -1,4 +1,4 @@
-name: rslog
+name: blinko
 build:
   cmake: .
   kconfig: Kconfig

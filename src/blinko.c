@@ -1,4 +1,4 @@
-#include <rslog.h>
+#include <blinko.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -15,24 +15,24 @@
 #include <zephyr/drivers/counter.h>
 #include <zephyr/drivers/flash.h>
 #include <zephyr/storage/flash_map.h>
-#ifdef CONFIG_RSLOG_NRF_FLASH_IN_FATAL
+#ifdef CONFIG_BLINKO_NRF_FLASH_IN_FATAL
 #include <nrfx_nvmc.h>
 #endif
 
-#define RSLOG_FAULT_MAGIC 0x52534641u /* "RSFA" */
-#define RSLOG_BOOT_MAGIC  0x52534254u /* "RSBT" */
-#define RSLOG_FLASH_MAGIC 0x52534545u /* "RSEE" */
-#define RSLOG_LOAD_MAGIC  0x4C4F4144u /* "LOAD" */
+#define BLINKO_FAULT_MAGIC 0x52534641u /* "RSFA" */
+#define BLINKO_BOOT_MAGIC  0x52534254u /* "RSBT" */
+#define BLINKO_FLASH_MAGIC 0x52534545u /* "RSEE" */
+#define BLINKO_LOAD_MAGIC  0x4C4F4144u /* "LOAD" */
 
 /* ------------------------------------------------------------ records */
 
 struct rs_ram_record {
-	uint32_t magic;       /* RSLOG_FAULT_MAGIC when a fault record is pending */
-	uint32_t boot_magic;  /* RSLOG_BOOT_MAGIC once init ran (warm reset detection) */
+	uint32_t magic;       /* BLINKO_FAULT_MAGIC when a fault record is pending */
+	uint32_t boot_magic;  /* BLINKO_BOOT_MAGIC once init ran (warm reset detection) */
 	uint32_t boot_count;
 	uint32_t loading;     /* boot-loop guard while reading flash */
 	uint32_t fw_id;
-	char checkpoint[RSLOG_CHECKPOINT_LEN];
+	char checkpoint[BLINKO_CHECKPOINT_LEN];
 	char text[RS_MSG_MAX_LEN + 1];
 };
 
@@ -47,30 +47,30 @@ struct rs_flash_record {
  * BLE bootloader clears on every reset (verified on hardware); RAM from
  * 0x20020000 up survives. Fixed address, far above anything Zephyr links
  * (app uses ~21 KB of the 256 KB) and below the bootloader's top-of-RAM flags. */
-#if CONFIG_RSLOG_RAM_RECORD_ADDR != 0
-#define ram_rec (*(struct rs_ram_record *)CONFIG_RSLOG_RAM_RECORD_ADDR)
+#if CONFIG_BLINKO_RAM_RECORD_ADDR != 0
+#define ram_rec (*(struct rs_ram_record *)CONFIG_BLINKO_RAM_RECORD_ADDR)
 #else
 static struct rs_ram_record ram_rec_noinit __noinit;
 #define ram_rec ram_rec_noinit
 #endif
 
 /* Record page: last 4 KB of the storage partition. */
-#define RSLOG_FLASH_PAGE 4096
-#define RSLOG_FLASH_OFF  (PARTITION_SIZE(storage_partition) - RSLOG_FLASH_PAGE)
-#define RSLOG_FLASH_ADDR (PARTITION_OFFSET(storage_partition) + RSLOG_FLASH_OFF)
+#define BLINKO_FLASH_PAGE 4096
+#define BLINKO_FLASH_OFF  (PARTITION_SIZE(storage_partition) - BLINKO_FLASH_PAGE)
+#define BLINKO_FLASH_ADDR (PARTITION_OFFSET(storage_partition) + BLINKO_FLASH_OFF)
 
 /* ---------------------------------------------------------------- state */
 
 /* LEDs from the board's led0..led3 aliases (led0 = fault LED, red where available). */
 #define LED_SPEC(alias) COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(alias)), (GPIO_DT_SPEC_GET(DT_ALIAS(alias), gpios)), ({ 0 }))
-static const struct gpio_dt_spec leds[RSLOG_MAX_LEDS] = { LED_SPEC(led0), LED_SPEC(led1), LED_SPEC(led2), LED_SPEC(led3) };
+static const struct gpio_dt_spec leds[BLINKO_MAX_LEDS] = { LED_SPEC(led0), LED_SPEC(led1), LED_SPEC(led2), LED_SPEC(led3) };
 static uint8_t led_present;                  /* bit i: leds[i] usable */
 
-/* Chip clock: a Zephyr counter device (alias rslog-timer), top-value callback. */
-#define RSLOG_TIMER_NODE DT_ALIAS(rslog_timer)
-static const struct device *const timer_dev = DEVICE_DT_GET(RSLOG_TIMER_NODE);
+/* Chip clock: a Zephyr counter device (alias blinko-timer), top-value callback. */
+#define BLINKO_TIMER_NODE DT_ALIAS(blinko_timer)
+static const struct device *const timer_dev = DEVICE_DT_GET(BLINKO_TIMER_NODE);
 
-static struct rslog_config cfg = RSLOG_CONFIG_DEFAULT;
+static struct blinko_config cfg = BLINKO_CONFIG_DEFAULT;
 static bool initialized;
 static rs_tx_t tx;
 static char fault_text[RS_MSG_MAX_LEN + 1];
@@ -86,8 +86,8 @@ static uint8_t strobe_level;
 /* led0..led2 = channels 0..2, led3 mirrors channel 0 (orange LED_BUILTIN). */
 static inline void write_chips(const uint8_t chips[RS_MAX_CHANNELS])
 {
-	static const uint8_t led_channel[RSLOG_MAX_LEDS] = { 0, 1, 2, 0 };
-	for (int i = 0; i < RSLOG_MAX_LEDS; i++) {
+	static const uint8_t led_channel[BLINKO_MAX_LEDS] = { 0, 1, 2, 0 };
+	for (int i = 0; i < BLINKO_MAX_LEDS; i++) {
 		if (led_present & BIT(i)) {
 			gpio_pin_set_dt(&leds[i], chips[led_channel[i]]);
 		}
@@ -157,8 +157,8 @@ static void flash_write_record(const struct rs_flash_record *r)
 	if (flash_area_open(PARTITION_ID(storage_partition), &fa) != 0) {
 		return;
 	}
-	flash_area_erase(fa, RSLOG_FLASH_OFF, RSLOG_FLASH_PAGE);
-	flash_area_write(fa, RSLOG_FLASH_OFF, r, sizeof(*r));
+	flash_area_erase(fa, BLINKO_FLASH_OFF, BLINKO_FLASH_PAGE);
+	flash_area_write(fa, BLINKO_FLASH_OFF, r, sizeof(*r));
 	flash_area_close(fa);
 }
 
@@ -169,7 +169,7 @@ static void flash_read_record(struct rs_flash_record *r)
 	if (flash_area_open(PARTITION_ID(storage_partition), &fa) != 0) {
 		return;
 	}
-	flash_area_read(fa, RSLOG_FLASH_OFF, r, sizeof(*r));
+	flash_area_read(fa, BLINKO_FLASH_OFF, r, sizeof(*r));
 	flash_area_close(fa);
 }
 
@@ -178,9 +178,9 @@ static void flash_read_record(struct rs_flash_record *r)
  * flash at the next boot. */
 static void flash_write_record_fatal(const struct rs_flash_record *r)
 {
-#ifdef CONFIG_RSLOG_NRF_FLASH_IN_FATAL
-	nrfx_nvmc_page_erase(RSLOG_FLASH_ADDR);
-	nrfx_nvmc_words_write(RSLOG_FLASH_ADDR, r, sizeof(*r) / 4);
+#ifdef CONFIG_BLINKO_NRF_FLASH_IN_FATAL
+	nrfx_nvmc_page_erase(BLINKO_FLASH_ADDR);
+	nrfx_nvmc_words_write(BLINKO_FLASH_ADDR, r, sizeof(*r) / 4);
 	while (!nrfx_nvmc_write_done_check()) {
 	}
 #else
@@ -244,12 +244,12 @@ static void vlog(uint8_t level, const char *fmt, va_list ap)
 	}
 }
 
-void rslog_log(uint8_t level, const char *fmt, ...)
+void blinko_log(uint8_t level, const char *fmt, ...)
 {
 	va_list ap; va_start(ap, fmt); vlog(level, fmt, ap); va_end(ap);
 }
 
-uint16_t rslog_board_id(void)
+uint16_t blinko_board_id(void)
 {
 	uint8_t id[16]; ssize_t n = hwinfo_get_device_id(id, sizeof(id));
 	uint32_t h = 2166136261u;
@@ -257,7 +257,7 @@ uint16_t rslog_board_id(void)
 	return (uint16_t)(h ^ (h >> 16));
 }
 
-void rslog_status(const char *fmt, ...)
+void blinko_status(const char *fmt, ...)
 {
 	char buf[RS_MSG_MAX_LEN + 1];
 	va_list ap; va_start(ap, fmt);
@@ -269,21 +269,21 @@ void rslog_status(const char *fmt, ...)
 	set_slot(RS_SLOT_STATUS, RS_LVL_STATUS, buf, MIN(n, RS_MSG_MAX_LEN));
 }
 
-void rslog_checkpoint(const char *name)
+void blinko_checkpoint(const char *name)
 {
-	strncpy(ram_rec.checkpoint, name, RSLOG_CHECKPOINT_LEN - 1);
-	ram_rec.checkpoint[RSLOG_CHECKPOINT_LEN - 1] = 0;
+	strncpy(ram_rec.checkpoint, name, BLINKO_CHECKPOINT_LEN - 1);
+	ram_rec.checkpoint[BLINKO_CHECKPOINT_LEN - 1] = 0;
 }
 
-bool rslog_has_fault(void) { return tx.slots[RS_SLOT_FAULT].valid; }
-const char *rslog_fault_text(void) { return fault_text; }
-uint32_t rslog_packets_sent(void) { return tx.packets_sent; }
-uint32_t rslog_boot_count(void) { return ram_rec.boot_count; }
-const char *rslog_reset_cause(void) { return reset_cause_str; }
-rs_tx_t *rslog_tx(void) { return &tx; }
-uint32_t rslog_chip_us(void) { return cfg.chip_us; }
+bool blinko_has_fault(void) { return tx.slots[RS_SLOT_FAULT].valid; }
+const char *blinko_fault_text(void) { return fault_text; }
+uint32_t blinko_packets_sent(void) { return tx.packets_sent; }
+uint32_t blinko_boot_count(void) { return ram_rec.boot_count; }
+const char *blinko_reset_cause(void) { return reset_cause_str; }
+rs_tx_t *blinko_tx(void) { return &tx; }
+uint32_t blinko_chip_us(void) { return cfg.chip_us; }
 
-void rslog_clear_fault(void)
+void blinko_clear_fault(void)
 {
 	fault_text[0] = 0;
 	unsigned int key = irq_lock();
@@ -301,7 +301,7 @@ static void apply_burst(rs_tx_t *t)
 	rs_tx_set_channels(t, cfg.channels, (uint32_t)cfg.pilot_ms * 1000u / cfg.chip_us);
 }
 
-void rslog_set_channels(uint8_t n)
+void blinko_set_channels(uint8_t n)
 {
 	cfg.channels = (n == 3) ? 3 : 1;
 	unsigned int key = irq_lock();
@@ -309,7 +309,7 @@ void rslog_set_channels(uint8_t n)
 	irq_unlock(key);
 }
 
-void rslog_set_chip_us(uint32_t us)
+void blinko_set_chip_us(uint32_t us)
 {
 	cfg.chip_us = MAX(us, 15u);
 	unsigned int key = irq_lock();
@@ -320,7 +320,7 @@ void rslog_set_chip_us(uint32_t us)
 	}
 }
 
-void rslog_set_burst(uint16_t on_ms, uint16_t off_ms)
+void blinko_set_burst(uint16_t on_ms, uint16_t off_ms)
 {
 	cfg.burst_on_ms = on_ms; cfg.burst_off_ms = off_ms;
 	unsigned int key = irq_lock();
@@ -328,7 +328,7 @@ void rslog_set_burst(uint16_t on_ms, uint16_t off_ms)
 	irq_unlock(key);
 }
 
-void rslog_set_enabled(bool on)
+void blinko_set_enabled(bool on)
 {
 	enabled = on;
 	if (!on) {
@@ -336,7 +336,7 @@ void rslog_set_enabled(bool on)
 	}
 }
 
-void rslog_strobe(float hz)
+void blinko_strobe(float hz)
 {
 	if (hz <= 0) {
 		strobe_mode = false;
@@ -347,7 +347,7 @@ void rslog_strobe(float hz)
 	if (running) timer_set_period((uint32_t)(500000.0f / hz));  /* toggle twice per period */
 }
 
-void rslog_led_test(bool on)
+void blinko_led_test(bool on)
 {
 	enabled = false;
 	write_all(on ? 1 : 0);
@@ -355,18 +355,18 @@ void rslog_led_test(bool on)
 
 /* ------------------------------------------------------- death loop */
 
-void rslog_persist_and_loop(const char *text)
+void blinko_persist_and_loop(const char *text)
 {
 	strncpy(ram_rec.text, text, RS_MSG_MAX_LEN);
 	ram_rec.text[RS_MSG_MAX_LEN] = 0;
-	ram_rec.magic = RSLOG_FAULT_MAGIC;
+	ram_rec.magic = BLINKO_FAULT_MAGIC;
 
 	(void)irq_lock();
 	if (running) {
 		timer_stop();
 	}
 	if (cfg.persist_faults) {
-		struct rs_flash_record fr = { .magic = RSLOG_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
+		struct rs_flash_record fr = { .magic = BLINKO_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
 		strncpy(fr.text, ram_rec.text, RS_MSG_MAX_LEN);
 		flash_write_record_fatal(&fr);
 	}
@@ -383,11 +383,11 @@ void rslog_persist_and_loop(const char *text)
 	/* Red LED of death: one stream on the fault LED only, always pulsed 150/50 ms. */
 	uint32_t chip_us = cfg.chip_us ? cfg.chip_us : 30;
 	rs_tx_set_channels(&ftx, 1, 0);
-	rs_tx_set_fault_weight(&ftx, CONFIG_RSLOG_FAULT_WEIGHT);
+	rs_tx_set_fault_weight(&ftx, CONFIG_BLINKO_FAULT_WEIGHT);
 	rs_tx_set_burst(&ftx, 150000u / chip_us, 50000u / chip_us);
 
 	write_all(0);
-	int fl = cfg.fault_led < RSLOG_MAX_LEDS ? cfg.fault_led : 0;
+	int fl = cfg.fault_led < BLINKO_MAX_LEDS ? cfg.fault_led : 0;
 	if (!(led_present & BIT(fl))) fl = 0;
 
 	/* Exact chip timing without interrupts: the counter device is restarted as a
@@ -422,17 +422,17 @@ void rslog_persist_and_loop(const char *text)
 	}
 }
 
-void rslog_fatal(uint8_t code, const char *fmt, ...)
+void blinko_fatal(uint8_t code, const char *fmt, ...)
 {
 	char buf[RS_MSG_MAX_LEN + 1];
 	int p = snprintk(buf, sizeof(buf), "F%u:", code);
 	va_list ap; va_start(ap, fmt);
 	vsnprintk(buf + p, sizeof(buf) - p, fmt, ap);
 	va_end(ap);
-	rslog_persist_and_loop(buf);
+	blinko_persist_and_loop(buf);
 }
 
-#ifdef CONFIG_RSLOG_FATAL_HOOK
+#ifdef CONFIG_BLINKO_FATAL_HOOK
 /* Zephyr fatal error hook: exceptions (bus/usage/mem faults), k_oops, k_panic,
  * stack overflows, spurious interrupts. reason: K_ERR_* */
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
@@ -456,16 +456,16 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 		if (nb > 0) {
 			char b[RS_MSG_MAX_LEN + 1]; int n = snprintk(b, sizeof(b), "bt");
 			for (int i = 0; i < nb; i++) { n += snprintk(b + n, sizeof(b) - n, " %05x", (unsigned)bt[i]); }
-			rslog_log(RS_LVL_ERROR, "%s", b);
+			blinko_log(RS_LVL_ERROR, "%s", b);
 		}
 	}
-	rslog_persist_and_loop(t);
+	blinko_persist_and_loop(t);
 }
 #endif
 
 /* ------------------------------------------------------------------ init */
 
-int rslog_init(const struct rslog_config *c)
+int blinko_init(const struct blinko_config *c)
 {
 	if (initialized) {
 		return 0;
@@ -476,7 +476,7 @@ int rslog_init(const struct rslog_config *c)
 	}
 	rs_tx_init(&tx);
 	led_present = 0;
-	for (int i = 0; i < RSLOG_MAX_LEDS; i++) {
+	for (int i = 0; i < BLINKO_MAX_LEDS; i++) {
 		if (leds[i].port == NULL || !gpio_is_ready_dt(&leds[i])) {
 			continue;
 		}
@@ -490,10 +490,10 @@ int rslog_init(const struct rslog_config *c)
 
 	read_reset_cause();
 
-	bool warm = ram_rec.boot_magic == RSLOG_BOOT_MAGIC;
+	bool warm = ram_rec.boot_magic == BLINKO_BOOT_MAGIC;
 	if (!warm) {
 		memset(&ram_rec, 0, sizeof(ram_rec));
-		ram_rec.boot_magic = RSLOG_BOOT_MAGIC;
+		ram_rec.boot_magic = BLINKO_BOOT_MAGIC;
 	}
 	if (ram_rec.fw_id != fw_build_id()) {
 		ram_rec.fw_id = fw_build_id();
@@ -502,34 +502,34 @@ int rslog_init(const struct rslog_config *c)
 	}
 	ram_rec.boot_count++;
 
-	if (ram_rec.magic == RSLOG_FAULT_MAGIC) {
+	if (ram_rec.magic == BLINKO_FAULT_MAGIC) {
 		ram_rec.text[RS_MSG_MAX_LEN] = 0;
 		strncpy(fault_text, ram_rec.text, RS_MSG_MAX_LEN);
 		ram_rec.magic = 0;
 		if (cfg.persist_faults) {
-			struct rs_flash_record fr = { .magic = RSLOG_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
+			struct rs_flash_record fr = { .magic = BLINKO_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
 			strncpy(fr.text, fault_text, RS_MSG_MAX_LEN);
 			flash_write_record(&fr);
 		}
 	} else if (warm && strcmp(reset_cause_str, "WDT") == 0) {
-		ram_rec.checkpoint[RSLOG_CHECKPOINT_LEN - 1] = 0;
+		ram_rec.checkpoint[BLINKO_CHECKPOINT_LEN - 1] = 0;
 		snprintk(fault_text, sizeof(fault_text), "WDT reset @%s",
 			 ram_rec.checkpoint[0] ? ram_rec.checkpoint : "?");
 		if (cfg.persist_faults) {
-			struct rs_flash_record fr = { .magic = RSLOG_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
+			struct rs_flash_record fr = { .magic = BLINKO_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
 			strncpy(fr.text, fault_text, RS_MSG_MAX_LEN);
 			flash_write_record(&fr);
 		}
 	} else if (cfg.persist_faults) {
-		if (warm && ram_rec.loading == RSLOG_LOAD_MAGIC) {
+		if (warm && ram_rec.loading == BLINKO_LOAD_MAGIC) {
 			struct rs_flash_record z = { 0 };
 			flash_write_record(&z);
 			strncpy(fault_text, "boot-loop guard: record wiped", RS_MSG_MAX_LEN);
 		} else {
 			struct rs_flash_record fr;
-			ram_rec.loading = RSLOG_LOAD_MAGIC;
+			ram_rec.loading = BLINKO_LOAD_MAGIC;
 			flash_read_record(&fr);
-			if (fr.magic == RSLOG_FLASH_MAGIC) {
+			if (fr.magic == BLINKO_FLASH_MAGIC) {
 				fr.text[RS_MSG_MAX_LEN] = 0;
 				strncpy(fault_text, fr.text, RS_MSG_MAX_LEN);
 			}
@@ -543,7 +543,7 @@ int rslog_init(const struct rslog_config *c)
 		set_slot(RS_SLOT_FAULT, RS_LVL_FAULT, fault_text, strlen(fault_text));
 	}
 	if (cfg.announce_boot) {
-		rslog_status("boot#%u rst=%s id=%04x", ram_rec.boot_count, reset_cause_str, rslog_board_id());
+		blinko_status("boot#%u rst=%s id=%04x", ram_rec.boot_count, reset_cause_str, blinko_board_id());
 	}
 	apply_burst(&tx);
 	int rc = timer_start(cfg.chip_us);
@@ -551,10 +551,10 @@ int rslog_init(const struct rslog_config *c)
 	return rc;
 }
 
-#ifdef CONFIG_RSLOG_AUTO_INIT
-static int rslog_sys_init(void)
+#ifdef CONFIG_BLINKO_AUTO_INIT
+static int blinko_sys_init(void)
 {
-	return rslog_init(NULL);
+	return blinko_init(NULL);
 }
-SYS_INIT(rslog_sys_init, APPLICATION, 0);
+SYS_INIT(blinko_sys_init, APPLICATION, 0);
 #endif

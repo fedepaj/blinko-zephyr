@@ -1,14 +1,14 @@
 /*
- * rslog_demo (Zephyr) — Arduino Nano 33 BLE. Shell over USB CDC:
- *   rslog info <text> | warn | err | debug | status
- *   rslog fatal <text>   record and blink forever on the red LED
- *   rslog hf             real bus fault -> k_sys_fatal_error_handler -> red LED of death
- *   rslog oops           k_oops()
- *   rslog hang           stop feeding the watchdog -> WDT reset, "WDT reset @checkpoint"
- *   rslog clear | chip <us> | strobe <hz> | led on|off|data | stat | reset
+ * blinko_demo (Zephyr) — Arduino Nano 33 BLE. Shell over USB CDC:
+ *   blinko info <text> | warn | err | debug | status
+ *   blinko fatal <text>   record and blink forever on the red LED
+ *   blinko hf             real bus fault -> k_sys_fatal_error_handler -> red LED of death
+ *   blinko oops           k_oops()
+ *   blinko hang           stop feeding the watchdog -> WDT reset, "WDT reset @checkpoint"
+ *   blinko clear | chip <us> | strobe <hz> | led on|off|data | stat | reset
  *
  * Hardware demo: short D2 to D3 -> a real bus fault is provoked -> the Zephyr
- * fatal handler (rslog core) blinks the reason on the red LED forever.
+ * fatal handler (blinko core) blinks the reason on the red LED forever.
  * Recover with a double-tap on RESET (the record is persisted and re-sent).
  */
 #include <zephyr/kernel.h>
@@ -22,9 +22,9 @@
 #include <hal/nrf_power.h>
 #include <stdlib.h>
 #include <string.h>
-#include <rslog.h>
+#include <blinko.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(rslog_demo, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(blinko_demo, LOG_LEVEL_DBG);
 
 static const struct device *wdt = DEVICE_DT_GET(DT_ALIAS(watchdog0));
 static const struct gpio_dt_spec short_sense = GPIO_DT_SPEC_GET(DT_NODELABEL(short_sense), gpios);
@@ -55,7 +55,7 @@ static int wdt_arm(uint32_t ms)
 
 #define LOG_CMD(name, level) \
 	static int cmd_##name(const struct shell *sh, size_t argc, char **argv) \
-	{ char b[128]; join_args(argc, argv, b, sizeof(b)); rslog_log(level, "%s", b); \
+	{ char b[128]; join_args(argc, argv, b, sizeof(b)); blinko_log(level, "%s", b); \
 	  shell_print(sh, "ok"); return 0; }
 LOG_CMD(info, RS_LVL_INFO)
 LOG_CMD(warn, RS_LVL_WARN)
@@ -63,19 +63,19 @@ LOG_CMD(err, RS_LVL_ERROR)
 LOG_CMD(debug, RS_LVL_DEBUG)
 
 static int cmd_status(const struct shell *sh, size_t argc, char **argv)
-{ char b[64]; join_args(argc, argv, b, sizeof(b)); rslog_status("%s", b); shell_print(sh, "ok"); return 0; }
+{ char b[64]; join_args(argc, argv, b, sizeof(b)); blinko_status("%s", b); shell_print(sh, "ok"); return 0; }
 
 static int cmd_fatal(const struct shell *sh, size_t argc, char **argv)
 {
 	char b[64]; join_args(argc, argv, b, sizeof(b));
 	shell_print(sh, "fatal: red LED of death"); k_sleep(K_MSEC(50));
-	rslog_fatal(42, "%s", b);
+	blinko_fatal(42, "%s", b);
 }
 
 static int cmd_hf(const struct shell *sh, size_t argc, char **argv)
 {
 	wdt_arm(4000);
-	rslog_checkpoint("hf-test");
+	blinko_checkpoint("hf-test");
 	shell_print(sh, "bus fault now (WDT reboot in ~4 s)"); k_sleep(K_MSEC(50));
 	volatile uint32_t *bad = (volatile uint32_t *)0xCFFFFFF0u;
 	(void)*bad;
@@ -84,7 +84,7 @@ static int cmd_hf(const struct shell *sh, size_t argc, char **argv)
 
 static int cmd_oops(const struct shell *sh, size_t argc, char **argv)
 {
-	wdt_arm(4000); rslog_checkpoint("oops-test");
+	wdt_arm(4000); blinko_checkpoint("oops-test");
 	shell_print(sh, "k_oops"); k_sleep(K_MSEC(50));
 	k_oops();
 	return 0;
@@ -92,26 +92,26 @@ static int cmd_oops(const struct shell *sh, size_t argc, char **argv)
 
 static int cmd_hang(const struct shell *sh, size_t argc, char **argv)
 {
-	wdt_arm(2000); rslog_checkpoint("hang-test");
+	wdt_arm(2000); blinko_checkpoint("hang-test");
 	shell_print(sh, "hanging: WDT reset in ~2 s");
 	hang = true;
 	return 0;
 }
 
-static int cmd_clear(const struct shell *sh, size_t argc, char **argv) { rslog_clear_fault(); shell_print(sh, "fault cleared"); return 0; }
+static int cmd_clear(const struct shell *sh, size_t argc, char **argv) { blinko_clear_fault(); shell_print(sh, "fault cleared"); return 0; }
 static int cmd_rgb(const struct shell *sh, size_t argc, char **argv)
-{ int n = argc > 1 ? atoi(argv[1]) : 3; rslog_set_channels(n); shell_print(sh, n == 1 ? "1 channel" : "3 channels (RGB)"); return 0; }
+{ int n = argc > 1 ? atoi(argv[1]) : 3; blinko_set_channels(n); shell_print(sh, n == 1 ? "1 channel" : "3 channels (RGB)"); return 0; }
 static int cmd_burst(const struct shell *sh, size_t argc, char **argv)
-{ if (argc > 2) rslog_set_burst(strtoul(argv[1], NULL, 10), strtoul(argv[2], NULL, 10)); shell_print(sh, "burst set"); return 0; }
+{ if (argc > 2) blinko_set_burst(strtoul(argv[1], NULL, 10), strtoul(argv[2], NULL, 10)); shell_print(sh, "burst set"); return 0; }
 static int cmd_chip(const struct shell *sh, size_t argc, char **argv)
-{ if (argc > 1) rslog_set_chip_us(strtoul(argv[1], NULL, 10)); shell_print(sh, "chip_us=%u", rslog_chip_us()); return 0; }
+{ if (argc > 1) blinko_set_chip_us(strtoul(argv[1], NULL, 10)); shell_print(sh, "chip_us=%u", blinko_chip_us()); return 0; }
 static int cmd_strobe(const struct shell *sh, size_t argc, char **argv)
-{ float hz = argc > 1 ? strtof(argv[1], NULL) : 0; rslog_strobe(hz); shell_print(sh, hz > 0 ? "strobe on" : "data mode"); return 0; }
+{ float hz = argc > 1 ? strtof(argv[1], NULL) : 0; blinko_strobe(hz); shell_print(sh, hz > 0 ? "strobe on" : "data mode"); return 0; }
 static int cmd_led(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc > 1 && !strcmp(argv[1], "on")) rslog_led_test(true);
-	else if (argc > 1 && !strcmp(argv[1], "off")) rslog_led_test(false);
-	else rslog_set_enabled(true);
+	if (argc > 1 && !strcmp(argv[1], "on")) blinko_led_test(true);
+	else if (argc > 1 && !strcmp(argv[1], "off")) blinko_led_test(false);
+	else blinko_set_enabled(true);
 	return 0;
 }
 static uint32_t gpregret_at_boot, gpregret2_at_boot;
@@ -129,10 +129,10 @@ static int cmd_reset(const struct shell *sh, size_t argc, char **argv) { shell_p
 
 static int cmd_stat(const struct shell *sh, size_t argc, char **argv)
 {
-	rs_tx_t *tx = rslog_tx();
-	shell_print(sh, "packets_sent=%u chip_us=%u reset=%s boot#%u", rslog_packets_sent(), rslog_chip_us(),
-		    rslog_reset_cause(), rslog_boot_count());
-	shell_print(sh, "fault=%s", rslog_has_fault() ? rslog_fault_text() : "(none)");
+	rs_tx_t *tx = blinko_tx();
+	shell_print(sh, "packets_sent=%u chip_us=%u reset=%s boot#%u", blinko_packets_sent(), blinko_chip_us(),
+		    blinko_reset_cause(), blinko_boot_count());
+	shell_print(sh, "fault=%s", blinko_has_fault() ? blinko_fault_text() : "(none)");
 	shell_print(sh, "gpregret at boot: 0x%02x / 0x%02x", gpregret_at_boot, gpregret2_at_boot);
 	for (int i = 0; i < RS_NUM_SLOTS; i++) {
 		if (!tx->slots[i].valid) continue;
@@ -158,7 +158,7 @@ static int cmd_zlog(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-SHELL_STATIC_SUBCMD_SET_CREATE(rslog_cmds,
+SHELL_STATIC_SUBCMD_SET_CREATE(blinko_cmds,
 	SHELL_CMD(zlog, NULL, "zlog err|wrn|inf|dbg text (Zephyr LOG_x -> LEDs)", cmd_zlog),
 	SHELL_CMD(info, NULL, "log INFO", cmd_info),
 	SHELL_CMD(warn, NULL, "log WARN", cmd_warn),
@@ -179,7 +179,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(rslog_cmds,
 	SHELL_CMD(reset, NULL, "reboot", cmd_reset),
 	SHELL_CMD(dfu, NULL, "dfu [hexmagic] [reg]: set GPREGRET and reboot", cmd_dfu),
 	SHELL_SUBCMD_SET_END);
-SHELL_CMD_REGISTER(rslog, &rslog_cmds, "RSLog optical logger", NULL);
+SHELL_CMD_REGISTER(blinko, &blinko_cmds, "Blinko optical logger", NULL);
 
 /* Arduino-style "1200 baud touch": when the host sets the CDC line coding to
  * 1200 bps, ask the (Adafruit-derived) bootloader to stay in serial DFU mode
@@ -223,15 +223,15 @@ int main(void)
 {
 	gpregret_at_boot = nrf_power_gpregret_get(NRF_POWER, 0);
 	gpregret2_at_boot = nrf_power_gpregret_get(NRF_POWER, 1);
-	int rc = rslog_init(NULL);   /* already done by SYS_INIT when CONFIG_RSLOG_AUTO_INIT=y */
-	rslog_info("boot ok zephyr");
-	rslog_checkpoint("main");
+	int rc = blinko_init(NULL);   /* already done by SYS_INIT when CONFIG_BLINKO_AUTO_INIT=y */
+	blinko_info("boot ok zephyr");
+	blinko_checkpoint("main");
 	touch_1200_init();
 	usb_enable(NULL);
 	gpio_pin_configure_dt(&short_sense, GPIO_INPUT);
 	gpio_pin_configure_dt(&short_drive, GPIO_OUTPUT_INACTIVE);   /* D3 low: shorting D2-D3 pulls D2 low */
 	if (rc) {
-		rslog_error("timer init %d", rc);
+		blinko_error("timer init %d", rc);
 	}
 	while (1) {
 		if (hang) {
@@ -241,13 +241,13 @@ int main(void)
 		if (wdt_ch >= 0) wdt_feed(wdt, wdt_ch);
 		if (gpio_pin_get_dt(&short_sense) == 1) {
 			/* D2 shorted to D3: die for real (bus fault), no watchdog -> red LED of death */
-			rslog_checkpoint("d2-d3 short");
+			blinko_checkpoint("d2-d3 short");
 			volatile uint32_t *bad = (volatile uint32_t *)0xCFFFFFF0u;
 			(void)*bad;
 		}
 		if ((counter % 50) == 0) {
-			rslog_status("up=%us rst=%s n=%u id=%04x", (unsigned)(k_uptime_get() / 1000), rslog_reset_cause(), counter / 50, rslog_board_id());
-			rslog_checkpoint("main-loop");
+			blinko_status("up=%us rst=%s n=%u id=%04x", (unsigned)(k_uptime_get() / 1000), blinko_reset_cause(), counter / 50, blinko_board_id());
+			blinko_checkpoint("main-loop");
 		}
 		counter++;
 		check_touch_1200();

@@ -1,6 +1,6 @@
 / {
 	aliases {
-		rslog-timer = &timer1;
+		blinko-timer = &timer1;
 	};
 
 	chosen {
