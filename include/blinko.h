@@ -2,7 +2,7 @@
  * blinko.h — Blinko optical logger, Zephyr port (nRF52840 / Arduino Nano 33 BLE).
  *
  * Same wire protocol and message model as the Arduino library (core/):
- * a hardware timer streams Manchester chips to the LEDs; a phone camera
+ * a hardware timer streams RLL(2,7) line-code chips to the LEDs; a phone camera
  * decodes them through its rolling shutter.
  *
  * "Red LED of death": on a fatal error (Zephyr k_sys_fatal_error_handler,
@@ -25,7 +25,8 @@
 #define BLINKO_CHECKPOINT_LEN 16
 
 struct blinko_config {
-	uint32_t chip_us;          /* half-bit duration, default 30 */
+	uint32_t chip_us;          /* minimum run T of the line code in us (the timer runs T/3), default 60 */
+	uint8_t  repeat;           /* copies of every packet, 1..4 (default 1) */
 	uint16_t burst_on_ms;      /* visible blink: transmit for burst_on_ms ... */
 	uint16_t burst_off_ms;     /* ... then dark for burst_off_ms (0 = continuous) */
 	uint8_t channels;          /* 3 = RGB streams on led0/1/2 (led3 mirrors led0), 1 = same stream everywhere */
@@ -35,7 +36,7 @@ struct blinko_config {
 	bool announce_boot;        /* STATUS slot = boot count + reset cause */
 };
 
-#define BLINKO_CONFIG_DEFAULT { .chip_us = CONFIG_BLINKO_CHIP_US, .channels = CONFIG_BLINKO_CHANNELS, \
+#define BLINKO_CONFIG_DEFAULT { .chip_us = CONFIG_BLINKO_CHIP_US, .repeat = 1, .channels = CONFIG_BLINKO_CHANNELS, \
 			       .pilot_ms = CONFIG_BLINKO_PILOT_MS, \
 			       .burst_on_ms = CONFIG_BLINKO_BURST_ON_MS, .burst_off_ms = CONFIG_BLINKO_BURST_OFF_MS, \
 			       .fault_led = CONFIG_BLINKO_FAULT_LED, \

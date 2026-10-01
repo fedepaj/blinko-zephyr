@@ -12,8 +12,8 @@ menuconfig BLINKO
 if BLINKO
 
 config BLINKO_CHIP_US
-	int "Chip (half-bit) duration in microseconds"
-	default 30
+	int "Minimum run T of the line code in microseconds (timer period = T / 3)"
+	default 60
 	help
 	  Must be >= 4 camera row times and >= the phone's minimum exposure.
 	  iPhone 14: 30 us.

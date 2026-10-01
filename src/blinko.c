@@ -297,8 +297,10 @@ void blinko_clear_fault(void)
 
 static void apply_burst(rs_tx_t *t)
 {
-	rs_tx_set_burst(t, (uint32_t)cfg.burst_on_ms * 1000u / cfg.chip_us, (uint32_t)cfg.burst_off_ms * 1000u / cfg.chip_us);
-	rs_tx_set_channels(t, cfg.channels, (uint32_t)cfg.pilot_ms * 1000u / cfg.chip_us);
+	uint32_t cell_us = cfg.chip_us / RS_CELLS_PER_T;      /* chip_us is T, the timer runs one code cell */
+	rs_tx_set_burst(t, (uint32_t)cfg.burst_on_ms * 1000u / cell_us, (uint32_t)cfg.burst_off_ms * 1000u / cell_us);
+	rs_tx_set_channels(t, cfg.channels, (uint32_t)cfg.pilot_ms * 1000u / cell_us);
+	rs_tx_set_repeat(t, cfg.repeat ? cfg.repeat : 1);
 }
 
 void blinko_set_channels(uint8_t n)
@@ -311,12 +313,12 @@ void blinko_set_channels(uint8_t n)
 
 void blinko_set_chip_us(uint32_t us)
 {
-	cfg.chip_us = MAX(us, 15u);
+	cfg.chip_us = MAX(us, 24u);                         /* T >= 24 us: cell >= 8 us */
 	unsigned int key = irq_lock();
 	apply_burst(&tx);
 	irq_unlock(key);
 	if (running && !strobe_mode) {
-		timer_set_period(cfg.chip_us);
+		timer_set_period(cfg.chip_us / RS_CELLS_PER_T);
 	}
 }
 
@@ -340,7 +342,7 @@ void blinko_strobe(float hz)
 {
 	if (hz <= 0) {
 		strobe_mode = false;
-		if (running) timer_set_period(cfg.chip_us);
+		if (running) timer_set_period(cfg.chip_us / RS_CELLS_PER_T);
 		return;
 	}
 	strobe_mode = true;
@@ -546,7 +548,7 @@ int blinko_init(const struct blinko_config *c)
 		blinko_status("boot#%u rst=%s id=%04x", ram_rec.boot_count, reset_cause_str, blinko_board_id());
 	}
 	apply_burst(&tx);
-	int rc = timer_start(cfg.chip_us);
+	int rc = timer_start(cfg.chip_us / RS_CELLS_PER_T);
 	running = rc == 0;
 	return rc;
 }

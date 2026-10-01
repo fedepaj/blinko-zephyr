@@ -67,7 +67,7 @@ per message, module prefix and timestamp stripped; it needs
 | Option | Default | Meaning |
 |---|---|---|
 | `BLINKO` | n | enable the module (needs GPIO, HWINFO, FLASH, FLASH_MAP, COUNTER) |
-| `BLINKO_CHIP_US` | 30 | chip (half-bit) duration; ≥ 4 camera row times |
+| `BLINKO_CHIP_US` | 60 | T, the shortest run of the line code (µs); keep it above the phone's exposure, the timer runs at T/3 |
 | `BLINKO_CHANNELS` | 3 | 3 = RGB streams on led0/1/2 (led3 mirrors led0), 1 = one stream |
 | `BLINKO_PILOT_MS` | 30 | RGB colour-calibration pilot interval |
 | `BLINKO_FAULT_WEIGHT` | 3 | FAULT visits per other visit in the death loop (1–4) |
@@ -92,4 +92,5 @@ per message, module prefix and timestamp stripped; it needs
 set_enabled/strobe/led_test()` · `blinko_packets_sent/boot_count/reset_cause()`
 · `blinko_tx()` for the raw transmitter state · `blinko_persist_and_loop(text)`
 for a custom fatal handler. `struct blinko_config` mirrors the Kconfig options;
-`BLINKO_CONFIG_DEFAULT` fills it from them.
+`BLINKO_CONFIG_DEFAULT` fills it from them; `.repeat` (1–4) sends every packet
+several times for cameras whose window is shorter than a packet.
