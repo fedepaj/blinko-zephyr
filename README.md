@@ -71,6 +71,8 @@ per message, module prefix and timestamp stripped; it needs
 | `BLINKO_CHANNELS` | 3 | 3 = RGB streams on led0/1/2 (led3 mirrors led0), 1 = one stream |
 | `BLINKO_PILOT_MS` | 30 | RGB colour-calibration pilot interval |
 | `BLINKO_FAULT_WEIGHT` | 3 | FAULT visits per other visit in the death loop (1–4) |
+| `BLINKO_FAULT_CHIP_US` | 120 | the death loop's T, independent of the running one: the conservative value every phone tried could read |
+| `BLINKO_FAULT_REPEAT` | 3 | packet copies in the death loop |
 | `BLINKO_BURST_ON_MS` | 150 | visible blink: transmit time |
 | `BLINKO_BURST_OFF_MS` | 50 | visible blink: dark time (0 = continuous) |
 | `BLINKO_FAULT_LED` | 0 | led alias index used by the death loop |

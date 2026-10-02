@@ -27,6 +27,23 @@ config BLINKO_PILOT_MS
 	int "RGB colour-calibration pilot interval (ms)"
 	default 30
 
+config BLINKO_FAULT_CHIP_US
+	int "Death loop T in microseconds"
+	range 24 400
+	default 120
+	help
+	  The red LED of death ignores the running chip length and sends at this T,
+	  the most conservative value every phone tried could read (a 57 us-exposure
+	  Android phone needs T >= 90).
+
+config BLINKO_FAULT_REPEAT
+	int "Death loop packet copies"
+	range 1 100
+	default 3
+	help
+	  Every packet of the death loop is sent this many times back to back, so a
+	  30 fps phone whose window is shorter than a packet reads it across copies.
+
 config BLINKO_FAULT_WEIGHT
 	int "FAULT visits per other visit in the death loop (1-4)"
 	range 1 4

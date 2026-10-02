@@ -382,10 +382,13 @@ void blinko_persist_and_loop(const char *text)
 	ftx.slots[RS_SLOT_STATUS] = tx.slots[RS_SLOT_STATUS];
 	ftx.seq_counter = tx.seq_counter;
 	rs_tx_set_slot(&ftx, RS_SLOT_FAULT, RS_LVL_FAULT, ram_rec.text, strlen(ram_rec.text));
-	/* Red LED of death: one stream on the fault LED only, always pulsed 150/50 ms. */
-	uint32_t chip_us = cfg.chip_us ? cfg.chip_us : 30;
+	/* Red LED of death: one stream on the fault LED only, always pulsed 150/50 ms, at the
+	 * conservative timing every phone tried could read (T = 120 us, 3 copies by default), not
+	 * the running configuration: whoever picks the phone up must be able to read it. */
+	uint32_t chip_us = CONFIG_BLINKO_FAULT_CHIP_US / RS_CELLS_PER_T;   /* cell period */
 	rs_tx_set_channels(&ftx, 1, 0);
 	rs_tx_set_fault_weight(&ftx, CONFIG_BLINKO_FAULT_WEIGHT);
+	rs_tx_set_repeat(&ftx, CONFIG_BLINKO_FAULT_REPEAT);
 	rs_tx_set_burst(&ftx, 150000u / chip_us, 50000u / chip_us);
 
 	write_all(0);

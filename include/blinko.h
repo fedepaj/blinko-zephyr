@@ -26,7 +26,7 @@
 
 struct blinko_config {
 	uint32_t chip_us;          /* minimum run T of the line code in us (the timer runs T/3), default 60 */
-	uint8_t  repeat;           /* copies of every packet, 1..4 (default 1) */
+	uint8_t  repeat;           /* copies of every packet, 1..100 (default 1): 2-3 for 30 fps phones, 40-80 for far lights */
 	uint16_t burst_on_ms;      /* visible blink: transmit for burst_on_ms ... */
 	uint16_t burst_off_ms;     /* ... then dark for burst_off_ms (0 = continuous) */
 	uint8_t channels;          /* 3 = RGB streams on led0/1/2 (led3 mirrors led0), 1 = same stream everywhere */
