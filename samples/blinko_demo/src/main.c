@@ -1,11 +1,18 @@
 /*
  * blinko_demo (Zephyr) — Arduino Nano 33 BLE. Shell over USB CDC:
  *   blinko info <text> | warn | err | debug | status
- *   blinko fatal <text>   record and blink forever on the red LED
+ *   blinko zlog err|wrn|inf|dbg <text>   a Zephyr LOG_x line, through the log backend
+ *   blinko fatal <text>   record and blink on the red LED until reset
  *   blinko hf             real bus fault -> k_sys_fatal_error_handler -> red LED of death
  *   blinko oops           k_oops()
  *   blinko hang           stop feeding the watchdog -> WDT reset, "WDT reset @checkpoint"
- *   blinko clear | chip <us> | strobe <hz> | led on|off|data | stat | reset
+ *   blinko clear          forget the persisted fault
+ *   blinko chip <us>      T, the shortest run of the line code (the timer runs at T/3)
+ *   blinko rep <n>        copies of every packet
+ *   blinko rgb 3|1        three RGB streams, or one stream on every LED
+ *   blinko burst <on_ms> <off_ms>   visible blink (off 0 = continuous)
+ *   blinko strobe <hz>    calibration square wave (0 = back to data)
+ *   blinko led on|off|data | stat | reset | dfu
  *
  * Hardware demo: short D2 to D3 -> a real bus fault is provoked -> the Zephyr
  * fatal handler (blinko core) blinks the reason on the red LED forever.
@@ -105,6 +112,8 @@ static int cmd_burst(const struct shell *sh, size_t argc, char **argv)
 { if (argc > 2) blinko_set_burst(strtoul(argv[1], NULL, 10), strtoul(argv[2], NULL, 10)); shell_print(sh, "burst set"); return 0; }
 static int cmd_chip(const struct shell *sh, size_t argc, char **argv)
 { if (argc > 1) blinko_set_chip_us(strtoul(argv[1], NULL, 10)); shell_print(sh, "chip_us=%u", blinko_chip_us()); return 0; }
+static int cmd_rep(const struct shell *sh, size_t argc, char **argv)
+{ if (argc > 1) blinko_set_repeat((uint8_t)strtoul(argv[1], NULL, 10)); shell_print(sh, "repeat set"); return 0; }
 static int cmd_strobe(const struct shell *sh, size_t argc, char **argv)
 { float hz = argc > 1 ? strtof(argv[1], NULL) : 0; blinko_strobe(hz); shell_print(sh, hz > 0 ? "strobe on" : "data mode"); return 0; }
 static int cmd_led(const struct shell *sh, size_t argc, char **argv)
@@ -171,6 +180,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(blinko_cmds,
 	SHELL_CMD(hang, NULL, "hang until watchdog reset", cmd_hang),
 	SHELL_CMD(clear, NULL, "clear persisted fault", cmd_clear),
 	SHELL_CMD(chip, NULL, "chip <us>", cmd_chip),
+	SHELL_CMD(rep, NULL, "rep <n>: copies of every packet (1..100)", cmd_rep),
 	SHELL_CMD(burst, NULL, "burst <on_ms> <off_ms>", cmd_burst),
 	SHELL_CMD(rgb, NULL, "rgb 3|1", cmd_rgb),
 	SHELL_CMD(strobe, NULL, "strobe <hz> (0 = data)", cmd_strobe),

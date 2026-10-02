@@ -10,10 +10,21 @@ this repo a west manifest repository (see `docs/ZEPHYR.md`).
 
 - Zephyr v4.4.2 (pulled by `west.yml`), a Zephyr SDK with `arm-zephyr-eabi`,
   `west`, `ninja` and `dtc`.
-- A board whose devicetree provides the `led0`..`led3` aliases (only `led0` is
-  required: it is the death-loop LED), a `blinko-timer` alias pointing at a
-  `counter` device, and a `storage_partition`. The sample targets the Arduino
-  Nano 33 BLE (nRF52840); its overlay is in `samples/blinko_demo/boards/`.
+- A board whose devicetree provides at least one of the `led0`..`led3` aliases,
+  a `blinko-timer` alias pointing at a `counter` device that can run at 1 MHz
+  or more, and a `storage_partition` (the module uses its last 4 KB page for
+  the fault record). `led0`..`led2` carry the three streams and `led3` mirrors
+  `led0`; a board with a single LED sets `CONFIG_BLINKO_CHANNELS=1`. The
+  death loop blinks `BLINKO_FAULT_LED`, or the first LED there is.
+- The sample targets the Arduino Nano 33 BLE (nRF52840); its overlay, in
+  `samples/blinko_demo/boards/`, is the template for another board:
+
+  ```dts
+  / { aliases { blinko-timer = &timer1; }; };
+  &timer1 { status = "okay"; prescaler = <4>; };   /* 1 MHz */
+  ```
+- `make flash` is written for macOS with the Arduino `bossac` tool and
+  `pyserial` installed.
 
 ## Build and run
 
@@ -26,10 +37,27 @@ cd zephyr-module && make build && make flash     # BOARD=... for another board
 
 `make flash` runs `samples/blinko_demo/flash.sh` (1200-baud touch, then
 `bossac`); double-tap RESET if the bootloader is not caught. The demo exposes
-a shell over USB CDC at 115200: `blinko info <text>`, `warn`, `err`, `status`,
-`fatal <text>`, `hf`, `oops`, `hang`, `clear`, `chip <us>`, `strobe <hz>`,
-`led on|off|data`, `stat`, `reset`. Shorting D2 to D3 raises a real bus fault
-and the red LED blinks the reason forever.
+a shell over USB CDC at 115200 (all under `blinko`):
+
+| Command | |
+|---|---|
+| `info`, `warn`, `err`, `debug` `<text>` | a log message at that level |
+| `status <text>` | the STATUS message |
+| `zlog err\|wrn\|inf\|dbg <text>` | a Zephyr `LOG_x` line, through the log backend |
+| `fatal <text>` | record the text and blink it on the red LED until reset |
+| `hf`, `oops`, `hang` | a real bus fault, `k_oops()`, a watchdog reset |
+| `clear` | forget the persisted fault |
+| `chip <us>` | T, the shortest run of the line code (the timer runs at T/3) |
+| `rep <n>` | copies of every packet (1..100) |
+| `rgb 3\|1` | three RGB streams, or one stream on every LED |
+| `burst <on_ms> <off_ms>` | visible blink; off 0 = continuous |
+| `strobe <hz>` | calibration square wave; 0 = back to data |
+| `led on\|off\|data` | steady LEDs for a polarity check, or back to data |
+| `stat`, `reset`, `dfu` | transmitter state, reboot, reboot into the bootloader |
+
+Shorting D2 to D3 raises a real bus fault and the red LED blinks the reason
+until the board is reset; the reason is sent again after every boot until
+`blinko clear`.
 
 ## Use in your own application
 
@@ -59,18 +87,19 @@ With `CONFIG_BLINKO_AUTO_INIT=y` (default) the logger starts by itself and
 `k_panic()` or stack overflow ends up on the red LED without a line of code.
 `CONFIG_BLINKO_LOG_BACKEND=y` forwards `LOG_ERR()`/`LOG_WRN()`/`LOG_INF()`
 (and `LOG_DBG()` up to `BLINKO_LOG_BACKEND_LEVEL`) to the LEDs, one log line
-per message, module prefix and timestamp stripped; it needs
-`CONFIG_LOG_MODE_DEFERRED` (the default).
+per message, without module prefix and timestamp; use it with
+`CONFIG_LOG_MODE_DEFERRED` (the default), where the lines are formatted in the
+logging thread.
 
 ## Kconfig
 
 | Option | Default | Meaning |
 |---|---|---|
 | `BLINKO` | n | enable the module (needs GPIO, HWINFO, FLASH, FLASH_MAP, COUNTER) |
-| `BLINKO_CHIP_US` | 60 | T, the shortest run of the line code (µs); keep it above the phone's exposure, the timer runs at T/3 |
+| `BLINKO_CHIP_US` | 60 | T, the shortest run of the line code (µs, at least 24); keep it above the phone's exposure, the timer runs at T/3 |
 | `BLINKO_CHANNELS` | 3 | 3 = RGB streams on led0/1/2 (led3 mirrors led0), 1 = one stream |
 | `BLINKO_PILOT_MS` | 30 | RGB colour-calibration pilot interval |
-| `BLINKO_FAULT_WEIGHT` | 3 | FAULT visits per other visit in the death loop (1–4) |
+| `BLINKO_FAULT_WEIGHT` | 3 | airtime of the FAULT message in the death loop (1–4): w − 1 extra FAULT visits after every other message, about three quarters of the packets at 3 |
 | `BLINKO_FAULT_CHIP_US` | 120 | the death loop's T, independent of the running one: the conservative value every phone tried could read |
 | `BLINKO_FAULT_REPEAT` | 3 | packet copies in the death loop |
 | `BLINKO_BURST_ON_MS` | 150 | visible blink: transmit time |
@@ -87,12 +116,24 @@ per message, module prefix and timestamp stripped; it needs
 
 ## API (`include/blinko.h`)
 
-`blinko_init(cfg)` · `blinko_log(level, …)` and `blinko_debug/info/warn/error`
-· `blinko_status()` (STATUS slot) · `blinko_fatal(code, …)` (noreturn) ·
-`blinko_checkpoint(name)` · `blinko_has_fault/fault_text/clear_fault()` ·
-`blinko_board_id()` · `blinko_set_chip_us/chip_us/set_burst/set_channels/
-set_enabled/strobe/led_test()` · `blinko_packets_sent/boot_count/reset_cause()`
-· `blinko_tx()` for the raw transmitter state · `blinko_persist_and_loop(text)`
-for a custom fatal handler. `struct blinko_config` mirrors the Kconfig options;
-`BLINKO_CONFIG_DEFAULT` fills it from them; `.repeat` (1–4) sends every packet
-several times for cameras whose window is shorter than a packet.
+| Call | |
+|---|---|
+| `blinko_init(cfg)` | start with a configuration; only with `CONFIG_BLINKO_AUTO_INIT=n` (otherwise the module has started at boot on its Kconfig settings and the call returns `-EALREADY`). `BLINKO_CONFIG_DEFAULT` fills a `struct blinko_config` from Kconfig |
+| `blinko_log(level, fmt, …)`, `blinko_debug/info/warn/error(fmt, …)` | a log message: 31 bytes, up to 41 characters of ordinary text; a longer text is split (127 characters per call). Six are on air at a time. From threads and interrupt handlers |
+| `blinko_status(fmt, …)` | the STATUS message (one message; the same text again changes nothing) |
+| `blinko_fatal(code, fmt, …)` | record `F<code>:<text>` and blink it until reset; does not return |
+| `blinko_checkpoint(name)` | name the current phase: a watchdog reset reports `WDT reset @name` |
+| `blinko_has_fault()`, `blinko_fault_text()`, `blinko_clear_fault()` | the persisted fault, sent after every boot until cleared |
+| `blinko_board_id()` | 16-bit id of the board, announced as `id=xxxx` in the boot STATUS |
+| `blinko_set_chip_us(us)`, `blinko_chip_us()` | T at run time |
+| `blinko_set_repeat(n)`, `blinko_set_channels(n)`, `blinko_set_burst(on_ms, off_ms)` | copies of every packet (1..100), 3 or 1 streams, visible blink |
+| `blinko_set_enabled(on)`, `blinko_strobe(hz)`, `blinko_led_test(on)` | pause the LEDs, calibration square wave, polarity check |
+| `blinko_packets_sent()`, `blinko_boot_count()`, `blinko_reset_cause()` | counters and the reset cause as text |
+| `blinko_persist_and_loop(text)` | what the fatal hook calls, for a custom fatal handler |
+
+`blinko_tx()` gives the transmitter's state for diagnostics (the sample's
+`stat`). The header is usable from C++.
+
+A fault text is `ZF<reason> p=<pc> l=<lr>` for a Zephyr fatal error
+(`reason` is the `K_ERR_*` number), `F<code>:<text>` for `blinko_fatal`,
+`WDT reset @<checkpoint>` after a watchdog reset.

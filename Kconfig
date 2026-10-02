@@ -14,9 +14,12 @@ if BLINKO
 config BLINKO_CHIP_US
 	int "Minimum run T of the line code in microseconds (timer period = T / 3)"
 	default 60
+	range 24 1000000
 	help
-	  Must be >= 4 camera row times and >= the phone's minimum exposure.
-	  iPhone 14: 30 us.
+	  The shortest run of the line code. Keep it at or above the phone's
+	  shortest exposure, and long enough for a chip (T / 3) to span at least
+	  1.5 camera rows: 60 suits an iPhone 14 (15 us exposure), 90 to 120 a
+	  phone whose shortest exposure is about 57 us.
 
 config BLINKO_CHANNELS
 	int "LED channels: 3 = RGB streams on led0/led1/led2 (led3 mirrors led0), 1 = same stream on all"
@@ -50,7 +53,7 @@ config BLINKO_FAULT_WEIGHT
 	default 3
 	help
 	  Airtime given to the fault reason while the board is dead: 3 means about
-	  70 % of the packets carry the FAULT message, so it completes in 1-2 s while
+	  three quarters of the packets carry the FAULT message, so it completes in 1-2 s while
 	  STATUS and the last logs still follow.
 
 config BLINKO_BURST_ON_MS
@@ -98,7 +101,7 @@ config BLINKO_LOG_BACKEND
 	select LOG_OUTPUT
 	default y
 	help
-	  Every log line becomes an Blinko message (level mapped, no prefixes).
+	  Every log line becomes a Blinko message (level mapped, no prefixes).
 	  Needs CONFIG_LOG_MODE_DEFERRED (the default); minimal mode has no backends.
 
 config BLINKO_LOG_BACKEND_LEVEL

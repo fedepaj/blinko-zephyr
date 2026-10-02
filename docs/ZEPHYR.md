@@ -1,101 +1,95 @@
-# Port Zephyr (Arduino Nano 33 BLE Rev2, nRF52840)
+# The Zephyr module
 
-Workspace west minimale dentro il repo (`zephyr-app/west.yml` è il manifest:
-zephyr v4.4.2 + hal_nordic + cmsis). Toolchain: Zephyr SDK 1.0.1 minimal in
-`toolchain/` (solo `arm-zephyr-eabi`).
+How `blinko` is built on Zephyr. Using it is covered by the README; the wire
+format by `docs/PROTOCOL.md` of the blinko-core repository (the `core/`
+submodule).
 
-## Setup (già fatto una volta)
+## Parts
 
-```sh
-brew install ninja dtc
-.venv/bin/pip install west
-.venv/bin/west init -l zephyr-app && .venv/bin/west update --narrow -o=--depth=1
-# SDK: toolchain/zephyr-sdk-1.0.1/setup.sh -t arm-zephyr-eabi -h -c
-```
+| File | |
+|---|---|
+| `src/blinko.c` | the module: LEDs, chip timer, messages, boot bookkeeping, fault path |
+| `src/blinko_log_backend.c` | Zephyr log backend: `LOG_x()` lines become messages |
+| `include/blinko.h` | the API |
+| `Kconfig`, `CMakeLists.txt`, `zephyr/module.yml` | the module definition; `core/rs_tx.c` and `core/rs_pack.c` are the only core sources it compiles |
+| `samples/blinko_demo` | a shell over USB CDC for the Arduino Nano 33 BLE |
+| `west.yml` | makes this repository a west manifest (Zephyr v4.4.2) |
 
-## Build e flash
+## The chip timer
 
-```sh
-make zephyr           # build/zephyr/zephyr/zephyr.bin
-make zephyr-flash     # bossac (bootloader Arduino, offset 0x10000), porta auto
-```
+The `counter` device aliased `blinko-timer` runs with a top value of one chip
+(T/3) and calls the module at every wrap, in interrupt context. Each call
+writes the LEDs with the chips worked out by the call before, so the delay
+from the timer to the pins is constant, and then works out the next ones
+(`rs_tx_next_chips`). `led0`..`led2` take channels 0..2 and `led3` mirrors
+channel 0; LEDs the devicetree does not have are skipped.
 
-Shell su USB CDC (115200): `blinko info ciao`, `blinko fatal x`, `blinko hf`,
-`blinko oops`, `blinko hang`, `blinko clear`, `blinko chip 30`, `blinko rgb 3|1`,
-`blinko burst 150 50`, `blinko strobe 2000`, `blinko led on|off|data`,
-`blinko stat`, `blinko reset`. Il demo tiene il LED in continua
-(`CONFIG_BLINKO_BURST_OFF_MS=0`); **corto D2–D3** → bus fault reale → red LED
-of death (uscita: doppio reset).
+Choosing and encoding the next packets (`rs_tx_prepare`) takes several chip
+periods. The callback does it right after a packet has started, during the
+three dark chips of its gap: the timer ticks that fall in that time are
+skipped, so the gap is a few chips longer than three and the data field after
+every sync stays intact.
 
-## Uso in una qualsiasi app Zephyr
+## Messages
 
-Il port è un **modulo Zephyr** (`zephyr-modules/blinko`): nel `CMakeLists.txt`
-dell'app aggiungi `list(APPEND ZEPHYR_EXTRA_MODULES <repo>/zephyr-modules/blinko)`
-prima di `find_package(Zephyr)` e in `prj.conf`:
+`blinko_log()` formats the text (127 characters at most), packs it into one or
+more message slots with the timer interrupt running, and copies each slot
+into the transmitter with interrupts locked. `blinko_status()` does the same
+for the STATUS slot, unless the text is the one already on air. The calls may
+come from any thread and from interrupt handlers.
 
-```
-CONFIG_GPIO=y
-CONFIG_HWINFO=y
-CONFIG_FLASH=y
-CONFIG_FLASH_MAP=y
-CONFIG_COUNTER=y
-CONFIG_BLINKO=y
-# Nano 33 BLE: CONFIG_BLINKO_RAM_RECORD_ADDR=0x2003F000, CONFIG_NRFX_NVMC=y
-```
+The log backend receives each log line from the logging thread, formatted
+without timestamp, level and source, and hands it to `blinko_log()` at the
+matching level.
 
-Board Arduino con supporto Zephyr in-tree (v4.4): Due, GIGA R1, MKR Zero,
-Nano 33 BLE, Nano 33 IoT, Nano Matter, Nicla Sense ME/Vision, Opta, Portenta
-C33/H7, UNO Q, UNO R4, Zero. Per una nuova board: overlay con gli alias, poi
-`blinko stat` → `boot#` deve incrementare dopo `blinko reset` (altrimenti
-impostare `BLINKO_RAM_RECORD_ADDR`).
+## Boot and faults
 
-Nel device tree servono gli alias `led0..led3` (solo `led0` obbligatorio: è il
-LED del death loop), `blinko-timer` verso un timer con driver `counter`, e una
-`storage_partition`. Con `CONFIG_BLINKO_AUTO_INIT=y` (default) il logger parte da solo (SYS_INIT) e
-`k_sys_fatal_error_handler` è già agganciato: qualsiasi eccezione, `k_oops`,
-`k_panic` o stack overflow finisce nel **red LED of death** senza scrivere una
-riga di codice. Opzioni: `BLINKO_CHIP_US`, `BLINKO_LED_MASK`,
-`BLINKO_FAULT_LED_MASK`, `BLINKO_PERSIST`, `BLINKO_RAM_RECORD_ADDR`,
-`BLINKO_FATAL_HOOK`. API: `blinko_info/warn/error/status`, `blinko_fatal`,
-`blinko_checkpoint`, `blinko_clear_fault`.
+A record in RAM that survives resets (`.noinit`, or the fixed address
+`CONFIG_BLINKO_RAM_RECORD_ADDR` on boards whose bootloader clears `.noinit`;
+the Nano 33 BLE needs `0x2003F000`) holds the boot count, the build id, the
+last checkpoint and a pending fault text. At boot the module:
 
-## Architettura del port (`zephyr-modules/blinko`)
+- counts the boot and reads the reset cause (`hwinfo`);
+- if the record holds a fault, makes it the FAULT message and writes it to
+  flash (unless the same text is there already);
+- otherwise, after a watchdog reset, reports `WDT reset @<checkpoint>`;
+- otherwise loads the fault kept in flash, if any. A reset during that read is
+  taken as a damaged record and the next boot wipes it instead of reading it.
 
-| Blocco | Nano R4 (Arduino) | Nano 33 BLE (Zephyr) |
-|---|---|---|
-| chip clock | FspTimer GPT ISR | `counter` API (alias DT `blinko-timer`, callback sul top value) |
-| LED | `digitalWrite` | `gpio` API sugli alias `led0..led3` (polarità dal device tree) |
-| fault hook | `HardFault_Handler` (naked asm) | `k_sys_fatal_error_handler(reason, esf)` |
-| record RAM | indirizzo fisso 0x20007A00 | `.noinit` oppure indirizzo fisso (`BLINKO_RAM_RECORD_ADDR`, 0x2003F000 sulla Nano 33 BLE) |
-| record flash | data flash grezza, ultimo blocco | `flash_map` API al boot (portabile); su nRF anche subito nel fatal handler con `nrfx_nvmc` |
-| reset cause | `RSTSR0/1/2` | `hwinfo_get_reset_cause` |
-| watchdog | `WDT.begin` | `wdt_install_timeout` + `wdt_feed` |
-| death loop | `R_BSP_SoftwareDelay` | `k_busy_wait` (nrf, senza kernel) |
+A persisted fault is sent after every boot until `blinko_clear_fault()`.
 
-**Canali e LED**: `led0/led1/led2` = canali R/G/B (tre flussi indipendenti,
-`CONFIG_BLINKO_CHANNELS=3`), `led3` (arancione) ripete il canale 0. Le raffiche
-di lampeggio visibile sono a scelta dell'utente (`BLINKO_BURST_OFF_MS=0` =
-continuo). **Red LED of death**: in caso di fatal error il logger passa a un
-solo flusso sul `led0` (rosso), sempre pulsato 150/50 ms: un LED rosso che
-lampeggia significa "scheda morta, inquadrami e ti dico perché".
+The fault record lives in the last 4 KB page of `storage_partition`, validated
+by a magic word. An application that uses the same partition for NVS or a file
+system must leave that page out.
 
-Il core C (`core/rs_tx.c`) è identico a quello del Nano R4: il telefono non
-distingue le due schede.
+### The death loop
 
-## Risultati sull'hardware (2026-09-15)
+`k_sys_fatal_error_handler` (with `CONFIG_BLINKO_FATAL_HOOK`) and
+`blinko_fatal()` end in `blinko_persist_and_loop()`:
 
-- `blinko hf` → `ZF25 p=00011abc l=0001c167` (25 = bus fault preciso) riportato
-  dopo il riavvio da watchdog (RAM) e dopo reset software (flash, scritta dal
-  fatal handler con `nrfx_nvmc`); `blinko hang` → `WDT reset @hang-test`.
-- `blinko fatal vreg 2.9V brownout` → scheda "morta" (USB spento), solo LED
-  rosso lampeggiante: l'iPhone ha decodificato `F42:vreg 2.9V brownout`
-  (6.4 righe/chip nel loop `k_busy_wait`).
-- Bootloader Nano 33 BLE = "Arduino Bootloader (SAM-BA extended) 2.0": ignora
-  GPREGRET; entra in modalità seriale se trova `0x07738135` a **0x20007FFC**
-  (eredità SAMD a 32 KB di RAM). Il demo lo scrive al touch a 1200 baud
-  (callback `cdc_acm_dte_rate_callback_set`), quindi `zephyr-app/flash.sh`
-  funziona senza toccare la scheda; dal death loop serve il doppio reset.
-- Il bootloader azzera la RAM bassa (`.noinit` di Zephyr): il record vive a
-  0x2003F000 (le sonde a 0x20020000, 0x2003F000 e 0x2003FE00 sopravvivono).
-- Timer: il driver `nrfx_timer` non generava interrupt nella configurazione
-  provata; i registri di TIMER1 sono più semplici e funzionano.
+1. the text goes into the RAM record;
+2. interrupts are locked and the chip timer stopped;
+3. on Nordic SoCs (`CONFIG_BLINKO_NRF_FLASH_IN_FATAL`) the record is written
+   to flash at once with `nrfx_nvmc`; elsewhere the next boot writes it;
+4. a fresh transmitter is filled with the fault, the STATUS and the last log
+   messages, at the fault timing (`BLINKO_FAULT_CHIP_US`, `BLINKO_FAULT_REPEAT`,
+   `BLINKO_FAULT_WEIGHT`), one stream, pulsed 150/50 ms;
+5. the loop writes one LED chip by chip, timed by polling the counter device
+   as a free-running clock (`k_busy_wait` if it cannot be started). It uses no
+   interrupt and no kernel service.
+
+The loop ends only with a reset. If the fault happens before the module has
+started, no LED is configured and only the RAM record is kept for the next boot.
+
+## Limits
+
+- The timer callback and four GPIO writes run once per chip: how short T can
+  be depends on the SoC. 60 µs works on the nRF52840; the lower bound accepted
+  is 24 µs and is not guaranteed to be sustainable.
+- The packet period is longer than 82 chips by the ticks the encoding takes
+  (see "The chip timer"); a receiver's cyclic decode of repeated packets
+  assumes 82.
+- The fatal hook reads the program counter and the link register from the
+  Cortex-M exception frame; other architectures need their own hook.
+- The death loop relies on the counter and GPIO drivers working with
+  interrupts locked, which holds for the nRF drivers.

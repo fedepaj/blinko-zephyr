@@ -24,13 +24,7 @@ static void flush_line(void)
 		return;
 	}
 	line[line_len] = 0;
-	/* log_output prints "<module>: " before the text; the 31-character messages are better
-	 * spent on the text itself */
-	const char *text = line;
-	for (size_t i = 0; i + 1 < line_len && i < 24; i++) {
-		if (line[i] == ':' && line[i + 1] == ' ') { text = line + i + 2; break; }
-	}
-	blinko_log(cur_level, "%s", text);
+	blinko_log(cur_level, "%s", line);
 	line_len = 0;
 }
 
@@ -68,7 +62,9 @@ static void process(const struct log_backend *const backend, union log_msg_gener
 	default:            cur_level = RS_LVL_DEBUG; break;
 	}
 	line_len = 0;
-	log_output_msg_process(&blinko_log_output, &msg->log, 0);   /* no timestamp/level/module prefix */
+	/* the text only: no timestamp, level or "<module>: " prefix (the messages are short, and
+	 * stripping the prefix by looking for ": " also ate the start of lines that contain one) */
+	log_output_msg_process(&blinko_log_output, &msg->log, LOG_OUTPUT_FLAG_SKIP_SOURCE);
 	flush_line();
 }
 

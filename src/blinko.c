@@ -94,6 +94,8 @@ static inline void write_chips(const uint8_t chips[RS_MAX_CHANNELS])
 	}
 }
 
+static uint8_t next_chips[RS_MAX_CHANNELS];      /* what the next timer tick writes to the LEDs */
+
 static inline void write_all(uint8_t level)
 {
 	uint8_t v[RS_MAX_CHANNELS] = { level, level, level };
@@ -111,9 +113,18 @@ static void timer_cb(const struct device *dev, void *user_data)
 		write_all(strobe_level);
 		return;
 	}
-	uint8_t chips[RS_MAX_CHANNELS];
-	rs_tx_next_chips(&tx, chips);
-	write_chips(chips);
+	/* The pins first, with the chips worked out in the previous tick: the time from the timer
+	 * to the LEDs is then constant. Then, right after a new packet started, the packets that
+	 * will follow it are encoded (rs_tx_prepare): that takes several chip periods and falls in
+	 * the three dark chips of the packet's gap, which it lengthens, instead of holding the last
+	 * chip of the packet before it. (Encoding at the packet boundary, as this callback did,
+	 * stretched the last run of every packet; the Arduino port encodes in PendSV and loses no
+	 * tick at all, which a Zephyr port could do from a thread the callback wakes.) */
+	write_chips(next_chips);
+	if (rs_tx_wants_prepare(&tx)) {
+		rs_tx_prepare(&tx);
+	}
+	rs_tx_next_chips(&tx, next_chips);
 }
 
 static int timer_set_period(uint32_t period_us)
@@ -157,8 +168,9 @@ static void flash_write_record(const struct rs_flash_record *r)
 	if (flash_area_open(PARTITION_ID(storage_partition), &fa) != 0) {
 		return;
 	}
-	flash_area_erase(fa, BLINKO_FLASH_OFF, BLINKO_FLASH_PAGE);
-	flash_area_write(fa, BLINKO_FLASH_OFF, r, sizeof(*r));
+	if (flash_area_erase(fa, BLINKO_FLASH_OFF, BLINKO_FLASH_PAGE) == 0) {
+		(void)flash_area_write(fa, BLINKO_FLASH_OFF, r, sizeof(*r));
+	}
 	flash_area_close(fa);
 }
 
@@ -212,6 +224,7 @@ static void read_reset_cause(void)
 		else if (c & RESET_LOW_POWER_WAKE) s = "LPW";
 		else if (c & RESET_CPU_LOCKUP) s = "LOCKUP";
 		else if (c) s = "OTHER";
+		else s = "POR";                 /* no flag at all: what the nRF driver reports after a plain power-on */
 		hwinfo_clear_reset_cause();
 	}
 	strncpy(reset_cause_str, s, sizeof(reset_cause_str) - 1);
@@ -219,10 +232,21 @@ static void read_reset_cause(void)
 
 /* -------------------------------------------------------------- logging */
 
+/* A message is packed with the timer interrupt running (rs_tx_slot_prepare) and only copied into
+ * the transmitter with it locked: the packing takes several chip periods. */
 static void set_slot(uint8_t id, uint8_t level, const char *text, size_t len)
 {
+	rs_slot_t slot;
+	rs_tx_slot_prepare(&slot, level, text, len);
+	/* The text that is on air already is left alone: a status set again and again with the same
+	 * text would otherwise restart the slot from its first packet each time. */
+	const rs_slot_t *cur = &tx.slots[id];
+	if (slot.valid && cur->valid && cur->len == slot.len && cur->level == slot.level &&
+	    cur->packed == slot.packed && memcmp(cur->data, slot.data, slot.len) == 0) {
+		return;
+	}
 	unsigned int key = irq_lock();
-	rs_tx_set_slot(&tx, id, level, text, len);
+	rs_tx_put_slot(&tx, id, &slot);
 	irq_unlock(key);
 }
 
@@ -236,11 +260,18 @@ static void vlog(uint8_t level, const char *fmt, va_list ap)
 	if (n > (int)sizeof(buf) - 1) {
 		n = sizeof(buf) - 1;
 	}
-	for (int off = 0; off < n; off += RS_MSG_MAX_LEN) {
-		int len = MIN(n - off, RS_MSG_MAX_LEN);
+	/* a long text becomes several messages, oldest piece first; each takes as much text as its
+	 * 31 bytes hold (up to 41 characters when the 6-bit packing applies) */
+	for (int off = 0; off < n; ) {
+		rs_slot_t slot;
+		size_t took = rs_tx_slot_prepare(&slot, level, buf + off, (size_t)(n - off));
+		if (took == 0) {
+			break;
+		}
 		unsigned int key = irq_lock();
-		rs_tx_log(&tx, level, buf + off, len);
+		rs_tx_log_slot(&tx, &slot);
 		irq_unlock(key);
+		off += (int)took;
 	}
 }
 
@@ -259,14 +290,14 @@ uint16_t blinko_board_id(void)
 
 void blinko_status(const char *fmt, ...)
 {
-	char buf[RS_MSG_MAX_LEN + 1];
+	char buf[BLINKO_TEXT_CHARS_MAX + 1];           /* one message: what does not fit is dropped */
 	va_list ap; va_start(ap, fmt);
 	int n = vsnprintk(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	if (n < 0) {
 		return;
 	}
-	set_slot(RS_SLOT_STATUS, RS_LVL_STATUS, buf, MIN(n, RS_MSG_MAX_LEN));
+	set_slot(RS_SLOT_STATUS, RS_LVL_STATUS, buf, MIN(n, (int)sizeof(buf) - 1));
 }
 
 void blinko_checkpoint(const char *name)
@@ -313,13 +344,21 @@ void blinko_set_channels(uint8_t n)
 
 void blinko_set_chip_us(uint32_t us)
 {
-	cfg.chip_us = MAX(us, 24u);                         /* T >= 24 us: cell >= 8 us */
+	cfg.chip_us = MAX(us, BLINKO_MIN_CHIP_US);
 	unsigned int key = irq_lock();
 	apply_burst(&tx);
 	irq_unlock(key);
 	if (running && !strobe_mode) {
 		timer_set_period(cfg.chip_us / RS_CELLS_PER_T);
 	}
+}
+
+void blinko_set_repeat(uint8_t n)
+{
+	cfg.repeat = CLAMP(n, 1, RS_TX_MAX_REPEAT);
+	unsigned int key = irq_lock();
+	rs_tx_set_repeat(&tx, cfg.repeat);
+	irq_unlock(key);
 }
 
 void blinko_set_burst(uint16_t on_ms, uint16_t off_ms)
@@ -385,15 +424,22 @@ void blinko_persist_and_loop(const char *text)
 	/* Red LED of death: one stream on the fault LED only, always pulsed 150/50 ms, at the
 	 * conservative timing every phone tried could read (T = 120 us, 3 copies by default), not
 	 * the running configuration: whoever picks the phone up must be able to read it. */
-	uint32_t chip_us = CONFIG_BLINKO_FAULT_CHIP_US / RS_CELLS_PER_T;   /* cell period */
+	uint32_t cell_us = CONFIG_BLINKO_FAULT_CHIP_US / RS_CELLS_PER_T;   /* the fault T is in Kconfig: valid even before blinko_init */
 	rs_tx_set_channels(&ftx, 1, 0);
 	rs_tx_set_fault_weight(&ftx, CONFIG_BLINKO_FAULT_WEIGHT);
 	rs_tx_set_repeat(&ftx, CONFIG_BLINKO_FAULT_REPEAT);
-	rs_tx_set_burst(&ftx, 150000u / chip_us, 50000u / chip_us);
+	rs_tx_set_burst(&ftx, 150000u / cell_us, 50000u / cell_us);
 
 	write_all(0);
+	/* the configured fault LED, or the first LED there is; a fault before blinko_init (no LED
+	 * set up yet) has none and the loop below only keeps the record in RAM for the next boot */
 	int fl = cfg.fault_led < BLINKO_MAX_LEDS ? cfg.fault_led : 0;
-	if (!(led_present & BIT(fl))) fl = 0;
+	if (!(led_present & BIT(fl))) {
+		fl = -1;
+		for (int i = 0; i < BLINKO_MAX_LEDS; i++) {
+			if (led_present & BIT(i)) { fl = i; break; }
+		}
+	}
 
 	/* Exact chip timing without interrupts: the counter device is restarted as a
 	 * free-running clock and polled. The work per chip (encoder + GPIO) must not
@@ -405,7 +451,7 @@ void blinko_persist_and_loop(const char *text)
 		struct counter_top_cfg run = { .ticks = counter_get_max_top_value(timer_dev), .callback = NULL, .user_data = NULL, .flags = 0 };
 		if (counter_set_top_value(timer_dev, &run) == 0 && counter_start(timer_dev) == 0) {
 			top = run.ticks;
-			ticks = (uint32_t)(((uint64_t)counter_get_frequency(timer_dev) * chip_us) / 1000000u);
+			ticks = (uint32_t)(((uint64_t)counter_get_frequency(timer_dev) * cell_us) / 1000000u);
 			have_clock = ticks >= 4 && counter_get_value(timer_dev, &prev) == 0;
 		}
 	}
@@ -420,10 +466,17 @@ void blinko_persist_and_loop(const char *text)
 				if (acc >= ticks) { acc -= ticks; break; }
 			}
 		} else {
-			k_busy_wait(chip_us);
+			k_busy_wait(cell_us);
 		}
-		gpio_pin_set_dt(&leds[fl], chip);
-		chip = rs_tx_next_chip(&ftx);           /* prepared while the chip is being shown */
+		if (fl >= 0) {
+			gpio_pin_set_dt(&leds[fl], chip);
+		}
+		/* the packets after this one are encoded right after a packet starts, during the three
+		 * dark chips of its gap, then the next chip while this one is being shown */
+		if (rs_tx_wants_prepare(&ftx)) {
+			rs_tx_prepare(&ftx);
+		}
+		chip = rs_tx_next_chip(&ftx);
 	}
 }
 
@@ -446,40 +499,48 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 	uint32_t lr = esf ? esf->basic.lr : 0;
 	char t[RS_MSG_MAX_LEN + 1];
 	snprintk(t, sizeof(t), "ZF%u p=%08x l=%08x", reason, (unsigned)pc, (unsigned)lr);
-	/* mini backtrace: return addresses found on the stack above the exception frame
-	 * (odd Thumb addresses inside flash), as an ERROR log copied into the death loop */
-	if (esf) {
-		const uint32_t *sp = (const uint32_t *)esf + sizeof(struct arch_esf) / 4;
-		uint32_t bt[3]; int nb = 0;
-		for (int i = 0; i < 96 && nb < 3; i++) {
-			uint32_t w = sp[i];
-			if ((w & 1) && w >= CONFIG_FLASH_BASE_ADDRESS + 0x100 &&
-			    w < CONFIG_FLASH_BASE_ADDRESS + CONFIG_FLASH_SIZE * 1024u && w != lr && w != (pc | 1)) {
-				bt[nb++] = w;
-			}
-		}
-		if (nb > 0) {
-			char b[RS_MSG_MAX_LEN + 1]; int n = snprintk(b, sizeof(b), "bt");
-			for (int i = 0; i < nb; i++) { n += snprintk(b + n, sizeof(b) - n, " %05x", (unsigned)bt[i]); }
-			blinko_log(RS_LVL_ERROR, "%s", b);
-		}
-	}
+	/* No backtrace line here, unlike the Arduino port. The frame Zephyr hands over is a copy on
+	 * the handler's stack, so scanning the words after it (as this hook once did) found the
+	 * fault handler's own return addresses, not the faulting thread's, and spent a log slot on
+	 * them. Program counter and link register are the thread's. */
 	blinko_persist_and_loop(t);
 }
 #endif
 
 /* ------------------------------------------------------------------ init */
 
+/* Write the fault text to flash unless it is there already: the fatal path may have written it
+ * (CONFIG_BLINKO_NRF_FLASH_IN_FATAL) before the reset that brought us here, and a crash loop
+ * behind a watchdog would otherwise erase the page twice per loop. */
+static void persist_fault(const char *text)
+{
+	struct rs_flash_record fr;
+	flash_read_record(&fr);
+	if (fr.magic == BLINKO_FLASH_MAGIC && strncmp(fr.text, text, RS_MSG_MAX_LEN) == 0) {
+		return;
+	}
+	memset(&fr, 0, sizeof(fr));
+	fr.magic = BLINKO_FLASH_MAGIC; fr.boot_count = ram_rec.boot_count;
+	strncpy(fr.text, text, RS_MSG_MAX_LEN);
+	flash_write_record(&fr);
+}
+
 int blinko_init(const struct blinko_config *c)
 {
 	if (initialized) {
-		return 0;
+		/* with CONFIG_BLINKO_AUTO_INIT the module is running already, on its Kconfig settings:
+		 * a configuration given now would be silently ignored, so say it */
+		return c ? -EALREADY : 0;
 	}
-	initialized = true;
 	if (c) {
 		cfg = *c;
 	}
+	/* a configuration that would divide by zero is brought into range */
+	cfg.chip_us = MAX(cfg.chip_us, BLINKO_MIN_CHIP_US);
+	cfg.channels = (cfg.channels == 3) ? 3 : 1;
+	cfg.repeat = CLAMP(cfg.repeat, 1, RS_TX_MAX_REPEAT);
 	rs_tx_init(&tx);
+	memset(next_chips, 0, sizeof(next_chips));
 	led_present = 0;
 	for (int i = 0; i < BLINKO_MAX_LEDS; i++) {
 		if (leds[i].port == NULL || !gpio_is_ready_dt(&leds[i])) {
@@ -512,18 +573,14 @@ int blinko_init(const struct blinko_config *c)
 		strncpy(fault_text, ram_rec.text, RS_MSG_MAX_LEN);
 		ram_rec.magic = 0;
 		if (cfg.persist_faults) {
-			struct rs_flash_record fr = { .magic = BLINKO_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
-			strncpy(fr.text, fault_text, RS_MSG_MAX_LEN);
-			flash_write_record(&fr);
+			persist_fault(fault_text);
 		}
 	} else if (warm && strcmp(reset_cause_str, "WDT") == 0) {
 		ram_rec.checkpoint[BLINKO_CHECKPOINT_LEN - 1] = 0;
 		snprintk(fault_text, sizeof(fault_text), "WDT reset @%s",
 			 ram_rec.checkpoint[0] ? ram_rec.checkpoint : "?");
 		if (cfg.persist_faults) {
-			struct rs_flash_record fr = { .magic = BLINKO_FLASH_MAGIC, .boot_count = ram_rec.boot_count };
-			strncpy(fr.text, fault_text, RS_MSG_MAX_LEN);
-			flash_write_record(&fr);
+			persist_fault(fault_text);
 		}
 	} else if (cfg.persist_faults) {
 		if (warm && ram_rec.loading == BLINKO_LOAD_MAGIC) {
@@ -553,6 +610,7 @@ int blinko_init(const struct blinko_config *c)
 	apply_burst(&tx);
 	int rc = timer_start(cfg.chip_us / RS_CELLS_PER_T);
 	running = rc == 0;
+	initialized = running;                  /* a failed init can be tried again */
 	return rc;
 }
 
